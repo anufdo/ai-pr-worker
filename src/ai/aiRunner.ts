@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
-import { runShell } from "../utils/exec.js";
+import { runFile } from "../utils/exec.js";
 import type { PrJob } from "../jobs/processPrJob.js";
 import { aiderCommand } from "./providers/aider.js";
 import { claudeCommand } from "./providers/claude.js";
@@ -23,6 +23,7 @@ export async function runAi(job: PrJob, directory: string): Promise<string> {
   const templatePath = path.resolve(process.cwd(), "prompts", "pr-fix.md");
   const prompt = render(await readFile(templatePath, "utf8"), job);
   const factories = { codex: codexCommand, claude: claudeCommand, aider: aiderCommand, custom: customCommand };
-  const { stdout, stderr } = await runShell(factories[config.aiProvider](prompt), directory);
+  const { command, args } = factories[config.aiProvider](prompt);
+  const { stdout, stderr } = await runFile(command, args, directory);
   return [stdout, stderr].filter(Boolean).join("\n").trim();
 }

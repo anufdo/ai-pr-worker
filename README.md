@@ -6,7 +6,7 @@ It does not merge PRs, deploy applications, accept arbitrary repositories, or ru
 
 ## Supported AI runners
 
-Set `AI_PROVIDER` to `codex`, `claude`, `aider`, or `custom`. `AI_COMMAND` is always configurable and must contain `{{PROMPT}}`.
+Set `AI_PROVIDER` to `codex`, `claude`, `aider`, or `custom`. `AI_COMMAND` is always configurable and must contain `{{PROMPT}}`. The worker parses this value into an executable and argument list, then runs it without a shell.
 
 ```env
 AI_PROVIDER=codex
