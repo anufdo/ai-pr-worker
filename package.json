@@ -8,6 +8,8 @@
     "build": "tsc",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:claude": "npm run build && node scripts/test-claude-hi.mjs",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

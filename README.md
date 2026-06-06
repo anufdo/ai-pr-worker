@@ -80,6 +80,20 @@ Validation commands run inside the checked-out repository. Start with `AUTO_PUSH
 
 Two helper scripts in `scripts/` let you verify the worker without waiting on a real GitHub delivery. Both expect a populated `.env` (`config.ts` validates the required variables on startup).
 
+The unit test suite verifies the `AI_COMMAND` parser and the same stdout/stderr capture path used by `runAi`:
+
+```bash
+npm test
+```
+
+It uses a fake local AI CLI, so it does not require a Claude login or call any external AI service.
+
+To send the hardcoded prompt `hi` to the real Claude CLI and print the actual stdout/stderr returned to the worker:
+
+```bash
+npm run test:claude
+```
+
 First, confirm the configured AI CLI runs and is authenticated **as the user that runs the worker** (the service account, not your interactive shell):
 
 ```bash
