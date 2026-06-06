@@ -6,7 +6,7 @@ It does not merge PRs, deploy applications, accept arbitrary repositories, or ru
 
 ## Supported AI runners
 
-Set `AI_PROVIDER` to `codex`, `claude`, `aider`, or `custom`. `AI_COMMAND` is always configurable and must contain `{{PROMPT}}`. The worker parses this value into an executable and argument list, then runs it without a shell.
+Set `AI_PROVIDER` to `codex`, `claude`, `aider`, or `custom`. `AI_COMMAND` is always configurable and must contain `{{PROMPT}}`. The worker parses this value into an executable and argument list, then runs it without a shell. There is no separate model variable: pick the model with the CLI's own flag inside `AI_COMMAND` (for Claude Code, `--model opus`, `--model sonnet`, `--model haiku`, or a pinned id like `--model claude-opus-4-8`).
 
 ```env
 AI_PROVIDER=codex
@@ -17,7 +17,7 @@ Other examples:
 
 ```env
 AI_PROVIDER=claude
-AI_COMMAND=claude -p "{{PROMPT}}"
+AI_COMMAND=claude -p --model opus "{{PROMPT}}"
 
 AI_PROVIDER=aider
 AI_COMMAND=aider --yes --message "{{PROMPT}}"
@@ -75,6 +75,40 @@ The worker responds to `opened`, `synchronize`, and `labeled` pull-request actio
 Copy `.env.example` to `.env` and set the GitHub token, webhook secret, allowed repositories, work directory, and AI command. Optional lint, test, build, install, push, concurrency, notification, and Hermes settings are documented inline in `.env.example`.
 
 Validation commands run inside the checked-out repository. Start with `AUTO_PUSH=false` on a disposable repository, then enable pushes after verifying the behavior.
+
+## Testing
+
+Two helper scripts in `scripts/` let you verify the worker without waiting on a real GitHub delivery. Both expect a populated `.env` (`config.ts` validates the required variables on startup).
+
+First, confirm the configured AI CLI runs and is authenticated **as the user that runs the worker** (the service account, not your interactive shell):
+
+```bash
+claude -p "Reply with the single word: OK"
+```
+
+**AI step in isolation** — exercises the real `runAi` path (render `prompts/pr-fix.md`, parse `AI_COMMAND`, run the CLI) against a local checkout. No webhook, token, clone, push, or comment. Build first, then run:
+
+```bash
+npm run build
+node scripts/test-ai-step.mjs                       # reviews this repo
+node scripts/test-ai-step.mjs --dir /path/to/repo   # reviews another checkout
+```
+
+The `AI output` block it prints is exactly what the worker would post in the PR comment's `### Notes` section.
+
+**Signed webhook end to end** — computes the HMAC signature and POSTs a `pull_request` payload to a locally running worker. Start the server (`npm run dev`), then in another terminal:
+
+```powershell
+./scripts/send-test-webhook.ps1 -Repo "owner/repo" -Branch "feature/test"
+```
+
+Read the response and the server logs:
+
+- `401 Invalid webhook signature`: secret mismatch between the script and `.env`.
+- `202 {"accepted":false,"reason":...}`: signature is valid; the `shouldRun` gate rejected the payload (not allowlisted, label missing, protected branch, fork, and so on).
+- `202 {"accepted":true}` plus a `Queued PR job` log line: the webhook path works and the job is running. With a real allowlisted repo, valid token, existing feature branch, and an authenticated AI CLI, the job then clones, runs the CLI, runs checks, and comments on the PR.
+
+Keep `AUTO_PUSH=false` for these runs until you have confirmed the behavior.
 
 ## Example workflow
 
