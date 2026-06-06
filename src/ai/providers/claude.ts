@@ -1,5 +1,5 @@
-import { customCommand } from "./custom.js";
+import { customCommand, type AiCommand } from "./custom.js";
 
-export function claudeCommand(prompt: string): string {
+export function claudeCommand(prompt: string): AiCommand {
   return customCommand(prompt);
 }

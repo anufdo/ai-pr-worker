@@ -24,6 +24,7 @@ export async function runFile(command: string, args: string[], cwd?: string): Pr
     timeout: config.maxJobMinutes * 60_000,
     maxBuffer: 10 * 1024 * 1024,
     env: process.env,
+    shell: false,
   });
   return { stdout: result.stdout, stderr: result.stderr };
 }
