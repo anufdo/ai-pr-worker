@@ -15,6 +15,7 @@ process.chdir(repoRoot);
 
 const { commandFromTemplate } = await import("../dist/ai/providers/custom.js");
 const { runAi } = await import("../dist/ai/aiRunner.js");
+const { runFile } = await import("../dist/utils/exec.js");
 
 test('parses AI_COMMAND=claude -p --model opus "{{PROMPT}}" as executable plus args', () => {
   const prompt = 'Fix this PR.\nDo not split this prompt; keep "quotes" intact.';
@@ -60,4 +61,11 @@ test("runAi logs execution and returns combined stdout/stderr from the AI comman
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test("runFile closes child stdin so noninteractive AI CLIs do not hang", async () => {
+  const { stdout, stderr } = await runFile("node", ["tests/fixtures/stdin-wait-ai-cli.mjs"], repoRoot);
+
+  assert.equal(stdout, "stdin closed\n");
+  assert.equal(stderr, "");
 });

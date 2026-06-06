@@ -1,12 +1,12 @@
-import { execFile, exec as shellExec } from "node:child_process";
+import { exec as shellExec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "../config.js";
 import { logger } from "./logger.js";
 import { maskSecrets } from "./maskSecrets.js";
 
-const execFileAsync = promisify(execFile);
 const shellExecAsync = promisify(shellExec);
 const forbiddenCommand = /(^|[\s;&|])sudo([\s;&|]|$)/i;
+const maxOutputBuffer = 10 * 1024 * 1024;
 
 export interface ExecResult {
   stdout: string;
@@ -23,15 +23,80 @@ function outputBytes(value: unknown): number {
   return 0;
 }
 
+function executableError(
+  message: string,
+  details: { code?: number | null; signal?: NodeJS.Signals | null; stdout: string; stderr: string },
+): Error & { code?: number | null; signal?: NodeJS.Signals | null; stdout: string; stderr: string } {
+  return Object.assign(new Error(message), details);
+}
+
 export async function runFile(command: string, args: string[], cwd?: string): Promise<ExecResult> {
   logger.info("Running executable", { command, args: args.map(safeArg), cwd });
   try {
-    const result = await execFileAsync(command, args, {
-      cwd,
-      timeout: config.maxJobMinutes * 60_000,
-      maxBuffer: 10 * 1024 * 1024,
-      env: process.env,
-      shell: false,
+    const result = await new Promise<ExecResult>((resolve, reject) => {
+      const child = spawn(command, args, {
+        cwd,
+        env: process.env,
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      let rejected = false;
+
+      const timer = setTimeout(() => {
+        rejected = true;
+        child.kill("SIGTERM");
+        reject(
+          executableError(`Command failed: ${command} ${args.join(" ")}`, {
+            code: null,
+            signal: "SIGTERM",
+            stdout,
+            stderr,
+          }),
+        );
+      }, config.maxJobMinutes * 60_000);
+
+      const collect = (stream: "stdout" | "stderr", chunk: Buffer | string) => {
+        if (rejected) return;
+        const text = String(chunk);
+        if (stream === "stdout") stdout += text;
+        else stderr += text;
+
+        if (Buffer.byteLength(stdout) > maxOutputBuffer || Buffer.byteLength(stderr) > maxOutputBuffer) {
+          rejected = true;
+          clearTimeout(timer);
+          child.kill("SIGTERM");
+          reject(
+            executableError(`Command output exceeded ${maxOutputBuffer} bytes: ${command} ${args.join(" ")}`, {
+              code: null,
+              signal: "SIGTERM",
+              stdout,
+              stderr,
+            }),
+          );
+        }
+      };
+
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => collect("stdout", chunk));
+      child.stderr.on("data", (chunk) => collect("stderr", chunk));
+      child.on("error", (error) => {
+        if (rejected) return;
+        rejected = true;
+        clearTimeout(timer);
+        reject(Object.assign(error, { stdout, stderr }));
+      });
+      child.on("close", (code, signal) => {
+        clearTimeout(timer);
+        if (rejected) return;
+        if (code === 0) {
+          resolve({ stdout, stderr });
+          return;
+        }
+        reject(executableError(`Command failed: ${command} ${args.join(" ")}`, { code, signal, stdout, stderr }));
+      });
     });
     logger.info("Executable completed", {
       command,
@@ -63,7 +128,7 @@ export async function runShell(command: string, cwd?: string): Promise<ExecResul
   const result = await shellExecAsync(command, {
     cwd,
     timeout: config.maxJobMinutes * 60_000,
-    maxBuffer: 10 * 1024 * 1024,
+    maxBuffer: maxOutputBuffer,
     env: process.env,
   });
   return { stdout: result.stdout, stderr: result.stderr };
