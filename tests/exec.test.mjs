@@ -39,3 +39,19 @@ test("runFile kills the child and rejects when output exceeds the cap", async ()
     },
   );
 });
+
+test("runFile logs a masked output preview when a child fails", async () => {
+  const logs = [];
+  const originalConsoleLog = console.log;
+  console.log = (...args) => logs.push(args.join(" "));
+
+  try {
+    await assert.rejects(runFile("node", ["-e", "console.error('hermes usage error'); process.exit(2)"], repoRoot));
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  assert.match(logs.join("\n"), /ERROR Executable failed/);
+  assert.match(logs.join("\n"), /"code":2/);
+  assert.match(logs.join("\n"), /"outputPreview":"hermes usage error"/);
+});

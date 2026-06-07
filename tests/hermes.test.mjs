@@ -66,3 +66,17 @@ test("resultComment includes Hermes apply status", () => {
 
   assert.match(body, /### Hermes apply\n- Status: passed/);
 });
+
+test("Hermes failure comment keeps Hermes output before long Claude plan", () => {
+  const body = resultComment({
+    job,
+    status: "Failed",
+    aiStatus: "passed",
+    hermesStatus: "failed",
+    summary: "- Hermes failed.",
+    notes: [`Hermes output:\nusage: hermes chat <agent> <message>`, `Claude plan:\n${"plan ".repeat(2000)}`].join("\n\n"),
+  });
+
+  assert.match(body, /Hermes output:\nusage: hermes chat <agent> <message>/);
+  assert.ok(body.indexOf("Hermes output:") < body.indexOf("Claude plan:"));
+});

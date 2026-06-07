@@ -26,7 +26,9 @@ export interface RunFileOptions {
 }
 
 function safeArg(arg: string): string {
-  return arg.replace(/\/\/[^/@]+@/g, "//***@");
+  const masked = arg.replace(/\/\/[^/@]+@/g, "//***@");
+  const cap = 500;
+  return masked.length <= cap ? masked : `${masked.slice(0, cap)}...(truncated, ${masked.length - cap} more characters)`;
 }
 
 function outputBytes(value: unknown): number {
@@ -61,6 +63,7 @@ export async function runFile(
 ): Promise<ExecResult> {
   const timeoutMs = options.timeoutMs ?? config.maxJobMinutes * 60_000;
   const outputCap = options.maxOutputBytes ?? maxOutputBuffer;
+  const startedAt = Date.now();
   logger.info("Running executable", { command, args: args.map(safeArg), cwd });
   try {
     const result = await new Promise<ExecResult>((resolve, reject) => {
@@ -131,6 +134,7 @@ export async function runFile(
     logger.info("Executable completed", {
       command,
       cwd,
+      durationMs: Date.now() - startedAt,
       stdoutBytes: outputBytes(result.stdout),
       stderrBytes: outputBytes(result.stderr),
     });
@@ -141,12 +145,18 @@ export async function runFile(
         ? {
             command,
             cwd,
+            durationMs: Date.now() - startedAt,
             code: "code" in error ? error.code : undefined,
             signal: "signal" in error ? error.signal : undefined,
             stdoutBytes: "stdout" in error ? outputBytes(error.stdout) : 0,
             stderrBytes: "stderr" in error ? outputBytes(error.stderr) : 0,
+            outputPreview: outputPreview(
+              "stdout" in error ? error.stdout : "",
+              "stderr" in error ? error.stderr : "",
+              error instanceof Error ? error.message : String(error),
+            ),
           }
-        : { command, cwd };
+        : { command, cwd, durationMs: Date.now() - startedAt };
     logger.error("Executable failed", details);
     throw error;
   }

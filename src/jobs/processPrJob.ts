@@ -169,7 +169,7 @@ export async function processPrJob(job: PrJob): Promise<void> {
               aiStatus,
               hermesStatus,
               summary: "- Hermes failed while applying the Claude plan; no changes were committed.",
-              notes: [`Claude plan:\n${aiSummary}`, `Hermes output:\n${hermesSummary}`].join("\n\n"),
+              notes: [`Hermes output:\n${hermesSummary}`, `Claude plan:\n${aiSummary}`].join("\n\n"),
             }),
           );
           await notify(`AI PR Worker Hermes step failed: ${job.repo}#${job.prNumber}`);
