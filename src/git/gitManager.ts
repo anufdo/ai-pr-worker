@@ -42,9 +42,9 @@ export async function changedFiles(directory: string): Promise<string[]> {
   return stdout.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3));
 }
 
-export async function commitAndPush(directory: string, branch: string): Promise<string> {
+export async function commitAndPush(directory: string, branch: string, message = "AI: handle task"): Promise<string> {
   await runFile("git", ["-C", directory, "add", "--all"]);
-  await runFile("git", ["-C", directory, "commit", "-m", "AI: handle need-this task"]);
+  await runFile("git", ["-C", directory, "commit", "-m", message]);
   const { stdout } = await runFile("git", ["-C", directory, "rev-parse", "HEAD"]);
   if (config.autoPush) await runFile("git", ["-C", directory, "push", "origin", `HEAD:${branch}`]);
   return stdout.trim();

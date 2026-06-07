@@ -12,8 +12,15 @@
   # Reads secret from .env, targets an allowlisted repo + existing feature branch:
   ./scripts/send-test-webhook.ps1 -Repo "TritonSolutions/app-one" -Branch "feature/test" -PrNumber 1
 
+.EXAMPLE
+  # Trigger the low-risk review action instead of the default full-fix:
+  ./scripts/send-test-webhook.ps1 -Repo "TritonSolutions/app-one" -Branch "feature/test" -Label "review-it"
+
 .NOTES
   - The repo must be in GITHUB_ALLOWED_REPOS or the gate returns accepted:false.
+  - -Label selects the action. Known labels (highest automation first):
+    need-this (full-fix) > fix-review > test-it > e2e-it > review-it.
+    The accepted response echoes the resolved action, e.g. {"accepted":true,"action":"review"}.
   - The branch must NOT be main/master/default, and head.repo must equal repo
     (fork PRs are rejected by design).
   - For a real end-to-end run, the branch must exist on GitHub and the token in

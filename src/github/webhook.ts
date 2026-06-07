@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Router } from "express";
 import { config } from "../config.js";
 import { enqueuePrJob } from "../jobs/jobQueue.js";
+import { resolveAction, type PrAction } from "../jobs/actions.js";
+import { isProtectedBranch } from "../jobs/guards.js";
 import { logger } from "../utils/logger.js";
 
 interface PullRequestPayload {
@@ -21,7 +23,7 @@ interface PullRequestPayload {
   };
 }
 
-function validSignature(body: Buffer, signature: string | undefined): boolean {
+export function validSignature(body: Buffer, signature: string | undefined): boolean {
   if (!signature?.startsWith("sha256=")) return false;
   const expected = `sha256=${createHmac("sha256", config.webhookSecret).update(body).digest("hex")}`;
   const actualBuffer = Buffer.from(signature);
@@ -29,16 +31,27 @@ function validSignature(body: Buffer, signature: string | undefined): boolean {
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-function shouldRun(payload: PullRequestPayload): { run: boolean; reason?: string } {
+// Settings the gate depends on, injectable so the decision can be unit-tested
+// without mutating the process-wide config.
+export interface GateSettings {
+  allowedRepos: ReadonlySet<string>;
+  allowDraftPrs: boolean;
+}
+
+export function shouldRun(
+  payload: PullRequestPayload,
+  settings: GateSettings = config,
+): { run: boolean; reason?: string; action?: PrAction } {
   const pr = payload.pull_request;
   if (!["opened", "synchronize", "labeled"].includes(payload.action)) return { run: false, reason: "ignored action" };
-  if (!config.allowedRepos.has(payload.repository.full_name)) return { run: false, reason: "repository is not allowlisted" };
+  if (!settings.allowedRepos.has(payload.repository.full_name)) return { run: false, reason: "repository is not allowlisted" };
   if (pr.head.repo?.full_name !== payload.repository.full_name) return { run: false, reason: "fork PRs are not supported" };
   if (pr.state !== "open" || pr.merged) return { run: false, reason: "PR is not open" };
-  if (pr.draft && !config.allowDraftPrs) return { run: false, reason: "draft PRs are disabled" };
-  if (!pr.labels.some((label) => label.name === config.triggerLabel)) return { run: false, reason: "trigger label is missing" };
-  if ([payload.repository.default_branch, "main", "master"].includes(pr.head.ref)) return { run: false, reason: "refusing protected branch" };
-  return { run: true };
+  if (pr.draft && !settings.allowDraftPrs) return { run: false, reason: "draft PRs are disabled" };
+  const action = resolveAction(pr.labels.map((label) => label.name));
+  if (!action) return { run: false, reason: "no action label present" };
+  if (isProtectedBranch(pr.head.ref, payload.repository.default_branch)) return { run: false, reason: "refusing protected branch" };
+  return { run: true, action };
 }
 
 export const webhookRouter = Router();
@@ -64,7 +77,7 @@ webhookRouter.post("/github", (request, response) => {
   }
 
   const decision = shouldRun(payload);
-  if (!decision.run) {
+  if (!decision.run || !decision.action) {
     logger.info("Webhook ignored", { repo: payload.repository.full_name, pr: payload.pull_request.number, reason: decision.reason });
     response.status(202).json({ accepted: false, reason: decision.reason });
     return;
@@ -80,6 +93,8 @@ webhookRouter.post("/github", (request, response) => {
     branch: payload.pull_request.head.ref,
     headSha: payload.pull_request.head.sha,
     url: payload.pull_request.html_url,
+    action: decision.action,
   });
-  response.status(202).json({ accepted: true });
+  logger.info("Webhook accepted", { repo: payload.repository.full_name, pr: payload.pull_request.number, action: decision.action });
+  response.status(202).json({ accepted: true, action: decision.action });
 });

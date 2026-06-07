@@ -13,6 +13,14 @@ export interface ExecResult {
   stderr: string;
 }
 
+export interface RunFileOptions {
+  // Override the kill timeout (defaults to MAX_JOB_MINUTES). Used by tests to
+  // exercise the timeout path without waiting whole minutes.
+  timeoutMs?: number;
+  // Override the output cap in bytes (defaults to 10 MiB).
+  maxOutputBytes?: number;
+}
+
 function safeArg(arg: string): string {
   return arg.replace(/\/\/[^/@]+@/g, "//***@");
 }
@@ -30,7 +38,14 @@ function executableError(
   return Object.assign(new Error(message), details);
 }
 
-export async function runFile(command: string, args: string[], cwd?: string): Promise<ExecResult> {
+export async function runFile(
+  command: string,
+  args: string[],
+  cwd?: string,
+  options: RunFileOptions = {},
+): Promise<ExecResult> {
+  const timeoutMs = options.timeoutMs ?? config.maxJobMinutes * 60_000;
+  const outputCap = options.maxOutputBytes ?? maxOutputBuffer;
   logger.info("Running executable", { command, args: args.map(safeArg), cwd });
   try {
     const result = await new Promise<ExecResult>((resolve, reject) => {
@@ -55,7 +70,7 @@ export async function runFile(command: string, args: string[], cwd?: string): Pr
             stderr,
           }),
         );
-      }, config.maxJobMinutes * 60_000);
+      }, timeoutMs);
 
       const collect = (stream: "stdout" | "stderr", chunk: Buffer | string) => {
         if (rejected) return;
@@ -63,12 +78,12 @@ export async function runFile(command: string, args: string[], cwd?: string): Pr
         if (stream === "stdout") stdout += text;
         else stderr += text;
 
-        if (Buffer.byteLength(stdout) > maxOutputBuffer || Buffer.byteLength(stderr) > maxOutputBuffer) {
+        if (Buffer.byteLength(stdout) > outputCap || Buffer.byteLength(stderr) > outputCap) {
           rejected = true;
           clearTimeout(timer);
           child.kill("SIGTERM");
           reject(
-            executableError(`Command output exceeded ${maxOutputBuffer} bytes: ${command} ${args.join(" ")}`, {
+            executableError(`Command output exceeded ${outputCap} bytes: ${command} ${args.join(" ")}`, {
               code: null,
               signal: "SIGTERM",
               stdout,

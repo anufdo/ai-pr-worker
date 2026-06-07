@@ -42,6 +42,7 @@ test("runAi logs execution and returns combined stdout/stderr from the AI comman
         branch: "feature/ai-command-test",
         headSha: "0".repeat(40),
         url: "https://github.com/local/test-repo/pull/7",
+        action: "review",
       },
       repoRoot,
     );
