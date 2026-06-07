@@ -3,6 +3,7 @@ import path from "node:path";
 import { config } from "../config.js";
 import { runFile } from "../utils/exec.js";
 import type { PrJob } from "../jobs/processPrJob.js";
+import { promptFileForAction } from "../jobs/actions.js";
 import { aiderCommand } from "./providers/aider.js";
 import { claudeCommand } from "./providers/claude.js";
 import { codexCommand } from "./providers/codex.js";
@@ -20,7 +21,7 @@ function render(template: string, job: PrJob): string {
 }
 
 export async function runAi(job: PrJob, directory: string): Promise<string> {
-  const templatePath = path.resolve(process.cwd(), "prompts", "pr-fix.md");
+  const templatePath = path.resolve(process.cwd(), "prompts", promptFileForAction(job.action));
   const prompt = render(await readFile(templatePath, "utf8"), job);
   const factories = { codex: codexCommand, claude: claudeCommand, aider: aiderCommand, custom: customCommand };
   const { command, args } = factories[config.aiProvider](prompt);

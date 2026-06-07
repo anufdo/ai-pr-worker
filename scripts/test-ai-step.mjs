@@ -4,7 +4,8 @@
  * checkout, with no GitHub webhook, token, clone, push, or comment involved.
  *
  * It imports the REAL compiled runAi(), so it tests the actual code path:
- *   prompts/pr-fix.md -> render placeholders -> parse AI_COMMAND -> execFile.
+ *   prompts/pr-<action>.md -> render placeholders -> parse AI_COMMAND -> execFile.
+ * The prompt is chosen by --action (default: review -> prompts/pr-review.md).
  * Whatever runAi returns is exactly what the worker would post in the PR
  * comment's "### Notes" section.
  *
@@ -19,10 +20,13 @@
  *   node scripts/test-ai-step.mjs                       # full review of this repo
  *   node scripts/test-ai-step.mjs --prompt "hi"         # isolate the CLI: run
  *                                                       # AI_COMMAND with a tiny
- *                                                       # prompt, skip pr-fix.md
+ *                                                       # prompt, skip the prompt file
  *   node scripts/test-ai-step.mjs --dir /path/to/repo
+ *   node scripts/test-ai-step.mjs --action full-fix --dir ../some-repo  # run the fix prompt
  *   node scripts/test-ai-step.mjs --dir ../some-repo --pr 42 --repo me/app \
  *        --branch feature/x --title "Add widget" --body "Closes #1"
+ *
+ * --action is one of: review | test | fix-review | full-fix | e2e (default: review).
  */
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -37,6 +41,7 @@ try {
     options: {
       dir: { type: "string" },
       prompt: { type: "string" },
+      action: { type: "string", default: "review" },
       pr: { type: "string", default: "1" },
       repo: { type: "string", default: "local/test-repo" },
       branch: { type: "string", default: "feature/test" },
@@ -56,7 +61,7 @@ if (values.help) {
   process.exit(0);
 }
 
-// runAi reads prompts/pr-fix.md from process.cwd(), and config.ts loads .env
+// runAi reads the per-action prompt from prompts/ under process.cwd(), and config.ts loads .env
 // from process.cwd() on import. Pin cwd to the repo root so both resolve
 // regardless of where the script was invoked. Must happen BEFORE importing dist.
 process.chdir(repoRoot);
@@ -77,6 +82,12 @@ if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) {
 const prNumber = Number.parseInt(values.pr, 10);
 if (!Number.isInteger(prNumber) || prNumber <= 0) {
   console.error(`--pr must be a positive integer (got "${values.pr}").`);
+  process.exit(1);
+}
+
+const ACTIONS = ["review", "test", "fix-review", "full-fix", "e2e"];
+if (!ACTIONS.includes(values.action)) {
+  console.error(`--action must be one of: ${ACTIONS.join(", ")} (got "${values.action}").`);
   process.exit(1);
 }
 
@@ -110,7 +121,7 @@ try {
   if (values.prompt !== undefined) {
     // Isolate the CLI: build argv from AI_COMMAND with a literal prompt and run
     // it through the worker's own parser + execFile (shell:false, env inherited).
-    // This is byte-for-byte how the worker invokes the AI, minus prompts/pr-fix.md.
+    // This is byte-for-byte how the worker invokes the AI, minus the prompt file.
     const { command, args } = commandFromTemplate(config.aiCommand, { PROMPT: values.prompt });
     const shownArgs = args.map((a) => (a === values.prompt ? "<prompt>" : a)).join(" ");
     console.log(`Mode       : direct prompt ("${values.prompt}")`);
@@ -129,8 +140,9 @@ try {
       branch: values.branch,
       headSha: "0".repeat(40),
       url: `https://github.com/${values.repo}/pull/${prNumber}`,
+      action: values.action,
     };
-    console.log(`Mode       : full review (prompts/pr-fix.md)`);
+    console.log(`Mode       : ${job.action} (prompts/pr-${job.action === "e2e" ? "review" : job.action}.md)`);
     console.log(`Fake PR    : ${job.repo}#${job.prNumber} (${job.branch})`);
     console.log("Running the AI CLI... (this can take a while)\n");
     output = await runAi(job, targetDir);
