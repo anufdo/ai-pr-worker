@@ -1,5 +1,6 @@
 import { config } from "../config.js";
-import { runAi } from "../ai/aiRunner.js";
+import { renderPlanningPrompt, runAi, runAiPrompt } from "../ai/aiRunner.js";
+import { runHermesApply } from "../ai/hermesRunner.js";
 import { checksPassed, runChecks, type CheckName, type CheckOutcome, type CheckResults } from "../checks/runChecks.js";
 import { changedFiles, commitAndPush, prepareRepo } from "../git/gitManager.js";
 import { commentOnPr } from "../github/comments.js";
@@ -80,6 +81,7 @@ export interface Report {
   summary: string;
   notes: string;
   aiStatus?: "passed" | "failed";
+  hermesStatus?: "passed" | "failed";
   checks?: CheckResults;
   commit?: string;
 }
@@ -91,6 +93,7 @@ export function resultComment(report: Report): string {
     `### Action\n- Action: \`${job.action}\`\n- Repo: ${job.repo}\n- PR: #${job.prNumber}\n- Branch: \`${job.branch}\``,
   ];
   if (report.aiStatus) sections.push(`### AI command\n- Status: ${report.aiStatus}`);
+  if (report.hermesStatus) sections.push(`### Hermes apply\n- Status: ${report.hermesStatus}`);
   sections.push(`### Summary\n${report.summary}`);
   sections.push(`### Checks\n${checks ? checkLines(checks) : "- Checks did not run"}`);
   if (checks && checks.e2e.status !== "skipped") {
@@ -129,13 +132,49 @@ export async function processPrJob(job: PrJob): Promise<void> {
       const directory = await prepareRepo(job.repo, job.repoCloneUrl, job.branch);
 
       let aiStatus: "passed" | "failed" = "passed";
+      let hermesStatus: "passed" | "failed" | undefined;
       let aiSummary: string;
+      let hermesSummary = "";
+      const useHermesExecutor = config.hermesEnabled && !isReadOnlyAction(job.action);
       try {
-        aiSummary = await runAi(job, directory);
+        aiSummary = useHermesExecutor ? await runAiPrompt(renderPlanningPrompt(job), directory) : await runAi(job, directory);
       } catch (error) {
         aiStatus = "failed";
         aiSummary = aiErrorOutput(error);
         logger.error("AI command failed", { repo: job.repo, pr: job.prNumber, action: job.action });
+      }
+
+      if (aiStatus === "failed") {
+        await report(job, resultComment({ job, status: "Failed", aiStatus, summary: "- The AI command failed; no changes were committed.", notes: aiSummary }));
+        await notify(`AI PR Worker AI step failed: ${job.repo}#${job.prNumber}`);
+        return;
+      }
+
+      if (useHermesExecutor) {
+        hermesStatus = "passed";
+        try {
+          hermesSummary = await runHermesApply(job, directory, aiSummary);
+        } catch (error) {
+          hermesStatus = "failed";
+          hermesSummary = aiErrorOutput(error);
+          logger.error("Hermes apply failed", { repo: job.repo, pr: job.prNumber, action: job.action });
+        }
+
+        if (hermesStatus === "failed") {
+          await report(
+            job,
+            resultComment({
+              job,
+              status: "Failed",
+              aiStatus,
+              hermesStatus,
+              summary: "- Hermes failed while applying the Claude plan; no changes were committed.",
+              notes: [`Claude plan:\n${aiSummary}`, `Hermes output:\n${hermesSummary}`].join("\n\n"),
+            }),
+          );
+          await notify(`AI PR Worker Hermes step failed: ${job.repo}#${job.prNumber}`);
+          return;
+        }
       }
 
       const checks = await runChecks(directory);
@@ -151,15 +190,8 @@ export async function processPrJob(job: PrJob): Promise<void> {
 
       // Read-only actions (review, e2e) never touch the branch — report and stop.
       if (isReadOnlyAction(job.action)) {
-        const status = aiStatus === "failed" ? "Failed" : "Reviewed";
-        await report(job, resultComment({ job, status, aiStatus, summary: readOnlySummary(job, checks), checks, notes: aiSummary }));
+        await report(job, resultComment({ job, status: "Reviewed", aiStatus, summary: readOnlySummary(job, checks), checks, notes: aiSummary }));
         await notify(`AI PR Worker ${job.action} completed: ${job.repo}#${job.prNumber}`);
-        return;
-      }
-
-      if (aiStatus === "failed") {
-        await report(job, resultComment({ job, status: "Failed", aiStatus, summary: "- The AI command failed; no changes were committed.", checks, notes: aiSummary }));
-        await notify(`AI PR Worker AI step failed: ${job.repo}#${job.prNumber}`);
         return;
       }
 
@@ -173,16 +205,17 @@ export async function processPrJob(job: PrJob): Promise<void> {
         const failedChecks = !checksPassed(checks);
         const note = looksPermissionBlocked(aiSummary)
           ? `${aiSummary}\n\n> The AI reported a blocked permission and changed no files. For a headless CLI, grant edit permission in AI_COMMAND (Claude Code: \`--permission-mode bypassPermissions\`).`
-          : aiSummary;
+          : [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n");
         await report(
           job,
           resultComment({
             job,
             status: failedChecks ? "Failed" : "No changes",
             aiStatus,
+            hermesStatus,
             summary: failedChecks
-              ? "- AI made no file changes; nothing to commit.\n- Checks failed against the unchanged checkout."
-              : "- AI made no file changes; nothing to commit.",
+              ? "- No file changes were made; nothing to commit.\n- Checks failed against the unchanged checkout."
+              : "- No file changes were made; nothing to commit.",
             checks,
             notes: note,
           }),
@@ -196,7 +229,18 @@ export async function processPrJob(job: PrJob): Promise<void> {
       }
 
       if (!checksPassed(checks)) {
-        await report(job, resultComment({ job, status: "Failed", aiStatus, summary: "- AI changes were left uncommitted because checks failed.", checks, notes: aiSummary }));
+        await report(
+          job,
+          resultComment({
+            job,
+            status: "Failed",
+            aiStatus,
+            hermesStatus,
+            summary: "- Changes were left uncommitted because checks failed.",
+            checks,
+            notes: [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n"),
+          }),
+        );
         await notify(`AI PR Worker checks failed: ${job.repo}#${job.prNumber}`);
         return;
       }
@@ -208,7 +252,16 @@ export async function processPrJob(job: PrJob): Promise<void> {
       const pushNote = config.autoPush ? `Pushed commit \`${commit}\`.` : `Created commit \`${commit}\`; AUTO_PUSH is disabled.`;
       await report(
         job,
-        resultComment({ job, status: "Success", aiStatus, summary: `- Updated ${files.length} file(s).\n- ${pushNote}`, checks, commit, notes: aiSummary }),
+        resultComment({
+          job,
+          status: "Success",
+          aiStatus,
+          hermesStatus,
+          summary: `- Updated ${files.length} file(s).\n- ${pushNote}`,
+          checks,
+          commit,
+          notes: [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n"),
+        }),
       );
       await notify(`AI PR Worker completed: ${job.repo}#${job.prNumber} ${pushNote}`);
     } catch (error) {

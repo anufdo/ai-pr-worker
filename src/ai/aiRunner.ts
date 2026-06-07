@@ -23,8 +23,36 @@ function render(template: string, job: PrJob): string {
 export async function runAi(job: PrJob, directory: string): Promise<string> {
   const templatePath = path.resolve(process.cwd(), "prompts", promptFileForAction(job.action));
   const prompt = render(await readFile(templatePath, "utf8"), job);
+  return runAiPrompt(prompt, directory);
+}
+
+export async function runAiPrompt(prompt: string, directory: string): Promise<string> {
   const factories = { codex: codexCommand, claude: claudeCommand, aider: aiderCommand, custom: customCommand };
   const { command, args } = factories[config.aiProvider](prompt);
   const { stdout, stderr } = await runFile(command, args, directory);
   return [stdout, stderr].filter(Boolean).join("\n").trim();
+}
+
+export function renderPlanningPrompt(job: PrJob): string {
+  return [
+    "You are reviewing a checked-out pull request repository.",
+    "Do not edit files, run write commands, commit, or push.",
+    "Inspect the repository and produce a concrete implementation plan for another local agent to apply.",
+    "",
+    "PR context:",
+    `- Repository: ${job.repo}`,
+    `- PR number: #${job.prNumber}`,
+    `- Branch: ${job.branch}`,
+    `- Title: ${job.title}`,
+    "- Description:",
+    "",
+    job.body || "(empty)",
+    "",
+    "Output:",
+    "- Summarize the requested change.",
+    "- List the files/functions likely involved.",
+    "- Give exact implementation steps.",
+    "- List tests/checks the executor should run.",
+    "- Mention any risks or ambiguity.",
+  ].join("\n");
 }

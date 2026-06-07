@@ -63,6 +63,7 @@ export const config = {
   discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL?.trim() || "",
   notifyWebhookUrl: process.env.NOTIFY_WEBHOOK_URL?.trim() || "",
   hermesEnabled: boolean("HERMES_ENABLED", false),
+  hermesNotifyEnabled: boolean("HERMES_NOTIFY_ENABLED", false),
   hermesCommand: process.env.HERMES_COMMAND?.trim() || 'hermes chat github-worker "{{MESSAGE}}"',
   secrets: [
     githubToken,

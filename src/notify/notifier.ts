@@ -12,7 +12,7 @@ export async function notify(message: string): Promise<void> {
     if (config.notifyProvider === "telegram") await sendTelegram(config.telegramBotToken, config.telegramChatId, message);
     if (config.notifyProvider === "discord") await sendDiscord(config.discordWebhookUrl, message);
     if (config.notifyProvider === "webhook") await postJson(config.notifyWebhookUrl, { message });
-    if (config.hermesEnabled) {
+    if (config.hermesNotifyEnabled) {
       const { command, args } = commandFromTemplate(config.hermesCommand, { MESSAGE: message });
       await runFile(command, args);
     }
