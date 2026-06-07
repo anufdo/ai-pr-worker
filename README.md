@@ -24,6 +24,8 @@ Add one of these labels to a PR in an allowlisted repository to trigger the work
 
 Set `AI_PROVIDER` to `codex`, `claude`, `aider`, or `custom`. `AI_COMMAND` is always configurable and must contain `{{PROMPT}}`. The worker parses this value into an executable and argument list, then runs it without a shell. There is no separate model variable: pick the model with the CLI's own flag inside `AI_COMMAND` (for Claude Code, `--model opus`, `--model sonnet`, `--model haiku`, or a pinned id like `--model claude-opus-4-8`).
 
+The worker runs the CLI **non-interactively with stdin closed**, so `AI_COMMAND` must not pause for an interactive permission prompt. If it does, the tool call is blocked, the AI makes no edits, and the CLI still exits successfully — the run looks "passed" but nothing changed. Use each CLI's approve-automatically flag: Claude Code `--permission-mode bypassPermissions`, Codex `--full-auto`, Aider `--yes`. For Claude Code, `bypassPermissions` auto-approves edits and bash and is safe for this worker (unprivileged account, disposable checkout, protected-file commits blocked, never merges); it refuses to run as root outside a sandbox, so run the worker as a normal user.
+
 ```env
 AI_PROVIDER=codex
 AI_COMMAND=codex exec --full-auto "{{PROMPT}}"
@@ -33,7 +35,7 @@ Other examples:
 
 ```env
 AI_PROVIDER=claude
-AI_COMMAND=claude -p --model opus "{{PROMPT}}"
+AI_COMMAND=claude -p --permission-mode bypassPermissions --model opus "{{PROMPT}}"
 
 AI_PROVIDER=aider
 AI_COMMAND=aider --yes --message "{{PROMPT}}"
@@ -178,6 +180,7 @@ Read [docs/SECURITY.md](docs/SECURITY.md) before deployment. Run this service as
 - `repository is not allowlisted`: add the exact `owner/repo` value to `GITHUB_ALLOWED_REPOS`.
 - `fork PRs are not supported`: create a branch in the allowlisted repository; fork code is intentionally not executed.
 - AI command failure: authenticate the selected CLI as the worker user and run the configured command manually.
+- AI ran but changed nothing (or the notes say something like "permission is being blocked"): the CLI hit an interactive permission prompt it could not answer in headless mode. Add the approve-automatically flag to `AI_COMMAND` (Claude Code: `--permission-mode bypassPermissions`).
 - Push failure: verify token repository access, `Contents: Read and write`, and branch protection rules.
 - Stale lock after a killed process: remove the matching file from the sibling `locks/` directory after confirming no worker job is active.
 

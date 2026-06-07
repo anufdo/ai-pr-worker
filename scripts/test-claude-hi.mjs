@@ -16,7 +16,7 @@ process.env.GITHUB_TOKEN ||= "test-github-token";
 process.env.GITHUB_WEBHOOK_SECRET ||= "test-webhook-secret";
 process.env.GITHUB_ALLOWED_REPOS ||= "local/test-repo";
 process.env.AI_PROVIDER = "claude";
-process.env.AI_COMMAND = 'claude -p --model opus "{{PROMPT}}"';
+process.env.AI_COMMAND = 'claude -p --permission-mode bypassPermissions --model opus "{{PROMPT}}"';
 process.env.MAX_JOB_MINUTES ||= "5";
 process.env.AUTO_MERGE ||= "false";
 

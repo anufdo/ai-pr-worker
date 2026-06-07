@@ -12,7 +12,7 @@ process.env.AUTO_MERGE = "false";
 
 process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 
-const { resultComment } = await import("../dist/jobs/processPrJob.js");
+const { resultComment, looksPermissionBlocked } = await import("../dist/jobs/processPrJob.js");
 
 const job = {
   repo: "local/test-repo",
@@ -82,6 +82,13 @@ test("resultComment masks known secrets that appear in the notes", () => {
 test("resultComment length-caps long notes", () => {
   const body = resultComment({ job, status: "Reviewed", summary: "s", notes: "A".repeat(5000), checks: checks() });
   assert.match(body, /truncated, \d+ more characters/);
+});
+
+test("looksPermissionBlocked flags AI output that reports a blocked edit", () => {
+  assert.equal(looksPermissionBlocked("I'm unable to edit the test files — permission is being blocked."), true);
+  assert.equal(looksPermissionBlocked("Permission denied while writing the file."), true);
+  assert.equal(looksPermissionBlocked("The edits were blocked by the sandbox."), true);
+  assert.equal(looksPermissionBlocked("Applied the requested change and updated the tests."), false);
 });
 
 test("resultComment does not include raw check output when INCLUDE_RAW_OUTPUT is off", () => {

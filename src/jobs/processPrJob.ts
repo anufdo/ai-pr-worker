@@ -45,6 +45,14 @@ function aiErrorOutput(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Heuristic: did the AI report that it was blocked from editing? Used only to add
+// a non-authoritative hint when an editing action produced no file changes — the
+// usual cause is a headless CLI hitting an interactive permission prompt it could
+// not answer (e.g. `claude -p` without --permission-mode bypassPermissions).
+export function looksPermissionBlocked(text: string): boolean {
+  return /permission (?:is )?(?:being )?(?:blocked|denied)|unable to (?:edit|write|modify)|edits? (?:were|was) blocked/i.test(text);
+}
+
 function checkLines(checks: CheckResults): string {
   return [
     `- Install: ${checks.install.status}`,
@@ -142,20 +150,29 @@ export async function processPrJob(job: PrJob): Promise<void> {
         return;
       }
 
+      // Inspect what the AI actually changed before interpreting the checks. A
+      // zero-change run from an editing action usually means the AI never wrote
+      // anything — most often a headless CLI that hit an interactive permission
+      // prompt it could not answer. Report that distinctly instead of blaming the
+      // checks, which then ran against unchanged code.
+      const files = await changedFiles(directory);
+      if (!files.length) {
+        const note = looksPermissionBlocked(aiSummary)
+          ? `${aiSummary}\n\n> The AI reported a blocked permission and changed no files. For a headless CLI, grant edit permission in AI_COMMAND (Claude Code: \`--permission-mode bypassPermissions\`).`
+          : aiSummary;
+        await report(job, resultComment({ job, status: "No changes", aiStatus, summary: "- AI made no file changes; nothing to commit.", checks, notes: note }));
+        await notify(`AI PR Worker completed with no changes: ${job.repo}#${job.prNumber}`);
+        return;
+      }
+
       if (!checksPassed(checks)) {
         await report(job, resultComment({ job, status: "Failed", aiStatus, summary: "- AI changes were left uncommitted because checks failed.", checks, notes: aiSummary }));
         await notify(`AI PR Worker checks failed: ${job.repo}#${job.prNumber}`);
         return;
       }
 
-      const files = await changedFiles(directory);
       const blocked = blockedPaths(files);
       if (blocked.length) throw new Error(`Refusing to commit protected file changes: ${blocked.join(", ")}`);
-      if (!files.length) {
-        await report(job, resultComment({ job, status: "No changes", aiStatus, summary: "- AI checked this PR but made no changes.", checks, notes: aiSummary }));
-        await notify(`AI PR Worker completed with no changes: ${job.repo}#${job.prNumber}`);
-        return;
-      }
 
       const commit = await commitAndPush(directory, job.branch, commitMessageForAction(job.action, job.prNumber));
       const pushNote = config.autoPush ? `Pushed commit \`${commit}\`.` : `Created commit \`${commit}\`; AUTO_PUSH is disabled.`;
