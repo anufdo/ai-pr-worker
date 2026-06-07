@@ -14,6 +14,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 process.chdir(repoRoot);
 
 const { commandFromTemplate } = await import("../dist/ai/providers/custom.js");
+const { ensureClaudeHeadlessPermissions } = await import("../dist/ai/providers/claude.js");
 const { runAi } = await import("../dist/ai/aiRunner.js");
 const { runFile } = await import("../dist/utils/exec.js");
 
@@ -23,6 +24,39 @@ test('parses AI_COMMAND=claude -p --model opus "{{PROMPT}}" as executable plus a
 
   assert.equal(command, "claude");
   assert.deepEqual(args, ["-p", "--model", "opus", prompt]);
+});
+
+test("claude provider adds bypassPermissions before the prompt when permission mode is missing", () => {
+  const prompt = "Fix this PR.\nActually edit files.";
+  const result = ensureClaudeHeadlessPermissions({ command: "claude", args: ["-p", "--model", "opus", prompt] }, prompt);
+
+  assert.deepEqual(result.args, ["-p", "--model", "opus", "--permission-mode", "bypassPermissions", prompt]);
+});
+
+test("claude provider inserts bypassPermissions before a short prompt", () => {
+  const prompt = "hi";
+  const result = ensureClaudeHeadlessPermissions({ command: "claude", args: ["-p", "--model", "opus", prompt] }, prompt);
+
+  assert.deepEqual(result.args, ["-p", "--model", "opus", "--permission-mode", "bypassPermissions", prompt]);
+});
+
+test("claude provider preserves an explicit permission mode", () => {
+  const prompt = "Fix this PR.\nActually edit files.";
+  const result = ensureClaudeHeadlessPermissions({
+    command: "claude",
+    args: ["-p", "--permission-mode", "default", "--model", "opus", prompt],
+  });
+
+  assert.deepEqual(result.args, ["-p", "--permission-mode", "default", "--model", "opus", prompt]);
+});
+
+test("claude provider does not rewrite non-Claude commands", () => {
+  const result = ensureClaudeHeadlessPermissions({
+    command: "node",
+    args: ["tests/fixtures/fake-ai-cli.mjs", "-p", "--model", "opus", "prompt"],
+  });
+
+  assert.deepEqual(result.args, ["tests/fixtures/fake-ai-cli.mjs", "-p", "--model", "opus", "prompt"]);
 });
 
 test("runAi logs execution and returns combined stdout/stderr from the AI command", async () => {

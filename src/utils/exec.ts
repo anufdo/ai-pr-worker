@@ -13,6 +13,10 @@ export interface ExecResult {
   stderr: string;
 }
 
+export interface RunShellOptions {
+  label?: string;
+}
+
 export interface RunFileOptions {
   // Override the kill timeout (defaults to MAX_JOB_MINUTES). Used by tests to
   // exercise the timeout path without waiting whole minutes.
@@ -29,6 +33,17 @@ function outputBytes(value: unknown): number {
   if (typeof value === "string") return Buffer.byteLength(value);
   if (Buffer.isBuffer(value)) return value.length;
   return 0;
+}
+
+function combinedOutput(stdout: unknown, stderr: unknown): string {
+  return [stdout, stderr].filter((value): value is string => typeof value === "string" && value.length > 0).join("\n").trim();
+}
+
+function outputPreview(stdout: unknown, stderr: unknown, fallback: string): string {
+  const combined = combinedOutput(stdout, stderr) || fallback;
+  const masked = maskSecrets(combined, config.secrets);
+  const cap = 1200;
+  return masked.length <= cap ? masked : `${masked.slice(0, cap)}\n...(truncated, ${masked.length - cap} more characters)`;
 }
 
 function executableError(
@@ -137,14 +152,46 @@ export async function runFile(
   }
 }
 
-export async function runShell(command: string, cwd?: string): Promise<ExecResult> {
+export async function runShell(command: string, cwd?: string, options: RunShellOptions = {}): Promise<ExecResult> {
   if (forbiddenCommand.test(command)) throw new Error("Refusing to run a command containing sudo");
-  logger.info("Running shell command", { command: maskSecrets(command, config.secrets), cwd });
-  const result = await shellExecAsync(command, {
-    cwd,
-    timeout: config.maxJobMinutes * 60_000,
-    maxBuffer: maxOutputBuffer,
-    env: process.env,
-  });
-  return { stdout: result.stdout, stderr: result.stderr };
+  const startedAt = Date.now();
+  logger.info("Running shell command", { label: options.label, command: maskSecrets(command, config.secrets), cwd });
+  try {
+    const result = await shellExecAsync(command, {
+      cwd,
+      timeout: config.maxJobMinutes * 60_000,
+      maxBuffer: maxOutputBuffer,
+      env: process.env,
+    });
+    logger.info("Shell command completed", {
+      label: options.label,
+      command: maskSecrets(command, config.secrets),
+      cwd,
+      durationMs: Date.now() - startedAt,
+      stdoutBytes: outputBytes(result.stdout),
+      stderrBytes: outputBytes(result.stderr),
+    });
+    return { stdout: result.stdout, stderr: result.stderr };
+  } catch (error) {
+    const details =
+      error && typeof error === "object"
+        ? {
+            label: options.label,
+            command: maskSecrets(command, config.secrets),
+            cwd,
+            durationMs: Date.now() - startedAt,
+            code: "code" in error ? error.code : undefined,
+            signal: "signal" in error ? error.signal : undefined,
+            stdoutBytes: "stdout" in error ? outputBytes(error.stdout) : 0,
+            stderrBytes: "stderr" in error ? outputBytes(error.stderr) : 0,
+            outputPreview: outputPreview(
+              "stdout" in error ? error.stdout : "",
+              "stderr" in error ? error.stderr : "",
+              error instanceof Error ? error.message : String(error),
+            ),
+          }
+        : { label: options.label, command: maskSecrets(command, config.secrets), cwd, durationMs: Date.now() - startedAt };
+    logger.error("Shell command failed", details);
+    throw error;
+  }
 }

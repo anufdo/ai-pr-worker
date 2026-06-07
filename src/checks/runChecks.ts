@@ -33,10 +33,10 @@ function errorOutput(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function check(enabled: boolean, command: string, directory: string): Promise<CheckOutcome> {
+async function check(name: CheckName, enabled: boolean, command: string, directory: string): Promise<CheckOutcome> {
   if (!enabled) return { status: "skipped", output: "" };
   try {
-    const { stdout, stderr } = await runShell(command, directory);
+    const { stdout, stderr } = await runShell(command, directory, { label: name });
     return { status: "passed", output: combine(stdout, stderr) };
   } catch (error) {
     return { status: "failed", output: errorOutput(error) };
@@ -59,7 +59,7 @@ export async function runChecks(
 ): Promise<CheckResults> {
   const results = {} as CheckResults;
   for (const spec of specs) {
-    results[spec.name] = await check(spec.enabled, spec.command, directory);
+    results[spec.name] = await check(spec.name, spec.enabled, spec.command, directory);
   }
   return results;
 }

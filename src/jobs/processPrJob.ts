@@ -54,13 +54,17 @@ export function looksPermissionBlocked(text: string): boolean {
 }
 
 function checkLines(checks: CheckResults): string {
-  return [
+  const lines = [
     `- Install: ${checks.install.status}`,
     `- Lint: ${checks.lint.status}`,
     `- Test: ${checks.test.status}`,
     `- Build: ${checks.build.status}`,
     `- E2E: ${checks.e2e.status}`,
-  ].join("\n");
+  ];
+  if (!config.includeRawOutput && Object.values(checks).some((outcome) => outcome.status === "failed")) {
+    lines.push("- Failed check output: hidden in PR comment; PM2 logs include a short masked failure preview. Set `INCLUDE_RAW_OUTPUT=true` to include snippets here.");
+  }
+  return lines.join("\n");
 }
 
 function rawCheckOutput(checks: CheckResults): string {
@@ -135,6 +139,15 @@ export async function processPrJob(job: PrJob): Promise<void> {
       }
 
       const checks = await runChecks(directory);
+      logger.info("Checks completed", {
+        repo: job.repo,
+        pr: job.prNumber,
+        install: checks.install.status,
+        lint: checks.lint.status,
+        test: checks.test.status,
+        build: checks.build.status,
+        e2e: checks.e2e.status,
+      });
 
       // Read-only actions (review, e2e) never touch the branch — report and stop.
       if (isReadOnlyAction(job.action)) {
@@ -157,11 +170,28 @@ export async function processPrJob(job: PrJob): Promise<void> {
       // checks, which then ran against unchanged code.
       const files = await changedFiles(directory);
       if (!files.length) {
+        const failedChecks = !checksPassed(checks);
         const note = looksPermissionBlocked(aiSummary)
           ? `${aiSummary}\n\n> The AI reported a blocked permission and changed no files. For a headless CLI, grant edit permission in AI_COMMAND (Claude Code: \`--permission-mode bypassPermissions\`).`
           : aiSummary;
-        await report(job, resultComment({ job, status: "No changes", aiStatus, summary: "- AI made no file changes; nothing to commit.", checks, notes: note }));
-        await notify(`AI PR Worker completed with no changes: ${job.repo}#${job.prNumber}`);
+        await report(
+          job,
+          resultComment({
+            job,
+            status: failedChecks ? "Failed" : "No changes",
+            aiStatus,
+            summary: failedChecks
+              ? "- AI made no file changes; nothing to commit.\n- Checks failed against the unchanged checkout."
+              : "- AI made no file changes; nothing to commit.",
+            checks,
+            notes: note,
+          }),
+        );
+        await notify(
+          failedChecks
+            ? `AI PR Worker checks failed with no changes: ${job.repo}#${job.prNumber}`
+            : `AI PR Worker completed with no changes: ${job.repo}#${job.prNumber}`,
+        );
         return;
       }
 
