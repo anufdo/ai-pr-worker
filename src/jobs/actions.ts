@@ -2,7 +2,7 @@ import { config } from "../config.js";
 
 // The set of label-driven actions the worker can perform. Each maps to a prompt
 // and a behavior with an explicit risk level (see docs/IMPROVEMENT_PLAN.md).
-export type PrAction = "review" | "test" | "fix-review" | "full-fix" | "e2e";
+export type PrAction = "review" | "test" | "fix-review" | "full-fix" | "e2e" | "add-tests" | "pass-tests";
 
 interface ActionLabel {
   label: string;
@@ -15,7 +15,9 @@ interface ActionLabel {
 export const ACTION_LABELS: readonly ActionLabel[] = [
   { label: "need-this", action: "full-fix" },
   { label: "fix-review", action: "fix-review" },
+  { label: "pass-tests", action: "pass-tests" },
   { label: "test-it", action: "test" },
+  { label: "add-tests", action: "add-tests" },
   { label: "e2e-it", action: "e2e" },
   { label: "review-it", action: "review" },
 ];
@@ -46,6 +48,8 @@ const PROMPT_FILES: Record<PrAction, string> = {
   test: "pr-test.md",
   "fix-review": "pr-fix-review.md",
   "full-fix": "pr-full-fix.md",
+  "add-tests": "pr-add-tests.md",
+  "pass-tests": "pr-pass-tests.md",
   e2e: "pr-review.md",
 };
 
