@@ -29,7 +29,24 @@ export function hermesApplyPrompt(job: PrJob, directory: string, plan: string): 
 }
 
 export async function runHermesApply(job: PrJob, directory: string, plan: string): Promise<string> {
-  const { command, args } = commandFromTemplate(config.hermesCommand, { MESSAGE: hermesApplyPrompt(job, directory, plan) });
+  const message = hermesApplyPrompt(job, directory, plan);
+  const { command, args } = hermesCommandFromTemplate(config.hermesCommand, message);
   const { stdout, stderr } = await runFile(command, args, directory);
   return [stdout, stderr].filter(Boolean).join("\n").trim();
+}
+
+export function hermesCommandFromTemplate(template: string, message: string): { command: string; args: string[] } {
+  const parsed = commandFromTemplate(template, { MESSAGE: message });
+  return normalizeHermesCommand(parsed.command, parsed.args, message);
+}
+
+function normalizeHermesCommand(command: string, args: string[], message: string): { command: string; args: string[] } {
+  const executable = command.replaceAll("\\", "/").split("/").pop()?.toLowerCase();
+  const messageIndex = args.findIndex((arg) => arg === message);
+
+  if (executable === "hermes" && args[0] === "chat" && messageIndex >= 0) {
+    return { command, args: ["-z", message, "chat"] };
+  }
+
+  return { command, args };
 }

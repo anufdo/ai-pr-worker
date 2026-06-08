@@ -17,8 +17,8 @@ process.env.AUTO_MERGE = "false";
 
 process.chdir(repoRoot);
 
-const { hermesApplyPrompt, runHermesApply } = await import("../dist/ai/hermesRunner.js");
-const { resultComment } = await import("../dist/jobs/processPrJob.js");
+const { hermesApplyPrompt, hermesCommandFromTemplate, runHermesApply } = await import("../dist/ai/hermesRunner.js");
+const { detailComments, resultComment } = await import("../dist/jobs/processPrJob.js");
 
 const job = {
   repo: "local/test-repo",
@@ -54,6 +54,20 @@ test("runHermesApply executes the configured Hermes command in the checkout", as
   assert.match(readFileSync(changedFile, "utf8"), /true/);
 });
 
+test("hermesCommandFromTemplate normalizes the old positional chat command", () => {
+  const result = hermesCommandFromTemplate('hermes chat github-worker "{{MESSAGE}}"', "apply this");
+
+  assert.equal(result.command, "hermes");
+  assert.deepEqual(result.args, ["-z", "apply this", "chat"]);
+});
+
+test("hermesCommandFromTemplate preserves the current -z chat command", () => {
+  const result = hermesCommandFromTemplate('hermes -z "{{MESSAGE}}" chat', "apply this");
+
+  assert.equal(result.command, "hermes");
+  assert.deepEqual(result.args, ["-z", "apply this", "chat"]);
+});
+
 test("resultComment includes Hermes apply status", () => {
   const body = resultComment({
     job,
@@ -79,4 +93,13 @@ test("Hermes failure comment keeps Hermes output before long Claude plan", () =>
 
   assert.match(body, /Hermes output:\nusage: hermes chat <agent> <message>/);
   assert.ok(body.indexOf("Hermes output:") < body.indexOf("Claude plan:"));
+});
+
+test("detailComments splits long text into ordered follow-up comments", () => {
+  const comments = detailComments("Hermes output", "x".repeat(25000));
+
+  assert.equal(comments.length, 3);
+  assert.match(comments[0], /^## AI PR Worker Detail: Hermes output \(1\/3\)/);
+  assert.match(comments[1], /^## AI PR Worker Detail: Hermes output \(2\/3\)/);
+  assert.match(comments[2], /^## AI PR Worker Detail: Hermes output \(3\/3\)/);
 });

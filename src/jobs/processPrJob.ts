@@ -29,6 +29,7 @@ export interface PrJob {
 // AI or a check might print.
 const NOTES_CAP = 4000;
 const SNIPPET_CAP = 2000;
+const DETAIL_CHUNK_CAP = 12000;
 
 function clip(text: string, cap: number): string {
   const masked = maskSecrets(text, config.secrets);
@@ -122,6 +123,26 @@ async function report(job: PrJob, body: string): Promise<void> {
   }
 }
 
+export function detailComments(title: string, text: string): string[] {
+  const masked = maskSecrets(text, config.secrets).trim();
+  if (!masked) return [];
+
+  const chunks: string[] = [];
+  for (let index = 0; index < masked.length; index += DETAIL_CHUNK_CAP) {
+    chunks.push(masked.slice(index, index + DETAIL_CHUNK_CAP));
+  }
+
+  return chunks.map((chunk, index) =>
+    [`## AI PR Worker Detail: ${title} (${index + 1}/${chunks.length})`, "", chunk].join("\n"),
+  );
+}
+
+async function reportDetails(job: PrJob, title: string, text: string): Promise<void> {
+  for (const body of detailComments(title, text)) {
+    await report(job, body);
+  }
+}
+
 export async function processPrJob(job: PrJob): Promise<void> {
   await withLock(`${job.repo}-${job.prNumber}`, async () => {
     logger.info("Starting PR job", { repo: job.repo, pr: job.prNumber, branch: job.branch, action: job.action });
@@ -169,9 +190,14 @@ export async function processPrJob(job: PrJob): Promise<void> {
               aiStatus,
               hermesStatus,
               summary: "- Hermes failed while applying the Claude plan; no changes were committed.",
-              notes: [`Hermes output:\n${hermesSummary}`, `Claude plan:\n${aiSummary}`].join("\n\n"),
+              notes: [
+                "Hermes failed. Full Hermes output and Claude plan are posted below in split detail comments.",
+                `Hermes output preview:\n${hermesSummary}`,
+              ].join("\n\n"),
             }),
           );
+          await reportDetails(job, "Hermes output", hermesSummary);
+          await reportDetails(job, "Claude plan", aiSummary);
           await notify(`AI PR Worker Hermes step failed: ${job.repo}#${job.prNumber}`);
           return;
         }
