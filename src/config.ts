@@ -81,6 +81,8 @@ export const config = {
 if (config.autoMerge) throw new Error("AUTO_MERGE is intentionally unsupported. Set AUTO_MERGE=false.");
 try {
   new RegExp(config.testFilePattern);
-} catch {
-  throw new Error("TEST_FILE_PATTERN must be a valid regular expression");
+} catch (error) {
+  throw new Error(
+    `TEST_FILE_PATTERN must be a valid regular expression (got ${JSON.stringify(config.testFilePattern)}): ${error instanceof Error ? error.message : String(error)}`,
+  );
 }
