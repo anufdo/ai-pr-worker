@@ -3,7 +3,7 @@ import path from "node:path";
 import { config } from "../config.js";
 import { runFile } from "../utils/exec.js";
 import type { PrJob } from "../jobs/processPrJob.js";
-import { promptFileForAction } from "../jobs/actions.js";
+import { promptFileForAction, actionConstraints } from "../jobs/actions.js";
 import { aiderCommand } from "./providers/aider.js";
 import { claudeCommand } from "./providers/claude.js";
 import { codexCommand } from "./providers/codex.js";
@@ -20,9 +20,15 @@ function render(template: string, job: PrJob): string {
   return Object.entries(values).reduce((result, [key, value]) => result.replaceAll(`{{${key}}}`, value), template);
 }
 
+export function renderActionPrompt(template: string, job: PrJob): string {
+  const base = render(template, job);
+  const constraints = actionConstraints(job.action);
+  return constraints ? `${base}\n\n${constraints}` : base;
+}
+
 export async function runAi(job: PrJob, directory: string): Promise<string> {
   const templatePath = path.resolve(process.cwd(), "prompts", promptFileForAction(job.action));
-  const prompt = render(await readFile(templatePath, "utf8"), job);
+  const prompt = renderActionPrompt(await readFile(templatePath, "utf8"), job);
   return runAiPrompt(prompt, directory);
 }
 
@@ -34,6 +40,7 @@ export async function runAiPrompt(prompt: string, directory: string): Promise<st
 }
 
 export function renderPlanningPrompt(job: PrJob): string {
+  const constraints = actionConstraints(job.action);
   return [
     "You are reviewing a checked-out pull request repository.",
     "Do not edit files, run write commands, commit, or push.",
@@ -48,6 +55,7 @@ export function renderPlanningPrompt(job: PrJob): string {
     "",
     job.body || "(empty)",
     "",
+    ...(constraints ? [constraints, ""] : []),
     "Output:",
     "- Summarize the requested change.",
     "- List the files/functions likely involved.",
