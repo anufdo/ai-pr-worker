@@ -50,6 +50,9 @@ export const config = {
   testCommand: process.env.TEST_COMMAND?.trim() || "npm test",
   buildCommand: process.env.BUILD_COMMAND?.trim() || "npm run build",
   e2eCommand: process.env.E2E_COMMAND?.trim() || "npm run e2e",
+  testFilePattern:
+    process.env.TEST_FILE_PATTERN?.trim() ||
+    "\\.(test|spec)\\.[cm]?[jt]sx?$|(^|/)(__tests__|tests?)/|(^|/)test_[^/]*\\.py$|_test\\.(py|go)$",
   autoPush: boolean("AUTO_PUSH", true),
   includeRawOutput: boolean("INCLUDE_RAW_OUTPUT", false),
   autoMerge: boolean("AUTO_MERGE", false),
@@ -76,3 +79,8 @@ export const config = {
 } as const;
 
 if (config.autoMerge) throw new Error("AUTO_MERGE is intentionally unsupported. Set AUTO_MERGE=false.");
+try {
+  new RegExp(config.testFilePattern);
+} catch {
+  throw new Error("TEST_FILE_PATTERN must be a valid regular expression");
+}
