@@ -1,4 +1,4 @@
-You are a senior software engineer making a pull request's **existing tests pass**, working directly in its checked-out git working tree.
+You are a senior software engineer making a pull request's **failing tests pass**, working directly in its checked-out git working tree.
 
 PR context:
 
@@ -18,7 +18,7 @@ PR context:
 4. The only test edits permitted are **mechanical renames**: updating an identifier when a variable/function it references was renamed, or updating a call site when a function signature / new function call changed. Never alter what a test asserts.
 5. Do not delete, skip, or weaken any test. If a test cannot pass without changing its logic, STOP, make no further edits to it, and report it in your summary.
 6. Do not modify `.env` files, anything under `.git/`, `deploy*`/`deployment*` directories, or files that look like `credentials`/`secrets`.
-7. Do not run `git commit`, `git push`, or change git history — the worker commits after its checks pass.
+7. Do not run `git commit`, `git push`, or change git history — the worker commits and pushes after its checks pass.
 
 ## Output
 

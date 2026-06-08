@@ -18,6 +18,10 @@ test("pr-pass-tests prompt freezes test logic and is templated", () => {
   const p = prompt("pr-pass-tests.md");
   assert.match(p, /production code only/i);
   assert.match(p, /mechanical rename/i);
+  assert.match(p, /Do NOT change test logic/i);
+  assert.match(p, /Treat the tests as the specification/i);
   assert.match(p, /STOP/);
+  assert.match(p, /\{\{REPO\}\}/);
   assert.match(p, /\{\{BRANCH\}\}/);
+  assert.match(p, /\{\{PR_BODY\}\}/);
 });

@@ -17,7 +17,7 @@ PR context:
 3. **Only add or edit test files** (and minimal test fixtures/helpers). Do NOT modify production code for any reason — not even to fix a bug you find. If you find a bug, describe it in your summary so a later `pass-tests` run can fix it.
 4. It is acceptable for the tests you add to FAIL against the current code — a failing edge-case test is the signal the code needs fixing. Do not weaken a test just to make it pass.
 5. Do not modify `.env` files, anything under `.git/`, `deploy*`/`deployment*` directories, or files that look like `credentials`/`secrets`. Never hardcode secrets in tests.
-6. Do not run `git commit`, `git push`, or change git history — the worker commits after its checks pass.
+6. Do not run `git commit`, `git push`, or change git history — the worker commits and pushes after its checks pass.
 
 ## Output
 
