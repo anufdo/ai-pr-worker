@@ -60,3 +60,35 @@ export function promptFileForAction(action: PrAction): string {
 export function commitMessageForAction(action: PrAction, prNumber: number): string {
   return `AI (${action}) for PR #${prNumber}`;
 }
+
+// Canonical, load-bearing constraints for an action. This is the single source
+// of truth for what an action may change; it is appended to the direct prompt and
+// injected into the Hermes planning and apply prompts so the rules hold on every
+// path (Hermes on or off). Only the two pipeline actions add constraints; every
+// other action returns "" to preserve its existing behavior.
+export function actionConstraints(action: PrAction): string {
+  switch (action) {
+    case "add-tests":
+      return [
+        "HARD CONSTRAINTS for this task (add-tests):",
+        "- You may ONLY add or edit test files and minimal test fixtures/helpers.",
+        "- Do NOT modify any production (non-test) code, for any reason — not even to fix a bug you find.",
+        "- Cover the changed behavior: happy path, edge cases, and realistic failure scenarios.",
+        "- The new tests MAY fail against the current code — that is expected and acceptable here; a later `pass-tests` run will make them pass.",
+        "- Do not weaken a test just to make it pass. List every test file you add or change.",
+      ].join("\n");
+    case "pass-tests":
+      return [
+        "HARD CONSTRAINTS for this task (pass-tests):",
+        "- Make the existing committed tests pass by editing PRODUCTION code only.",
+        "- Keep edits minimal: change only what is needed to make the tests pass; no unrelated changes or refactors.",
+        "- Do NOT change test logic, assertions, or expected values.",
+        "- You MAY edit a test ONLY for a mechanical rename: when a variable/function it references was renamed, or a call signature / new function call changed. Nothing else.",
+        "- Do NOT delete, skip, or weaken any test.",
+        "- If a test cannot pass without changing its logic, STOP and report it instead of editing the test.",
+        "- List every test-file edit you made and why.",
+      ].join("\n");
+    default:
+      return "";
+  }
+}

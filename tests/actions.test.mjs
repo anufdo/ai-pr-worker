@@ -11,7 +11,7 @@ process.env.AUTO_MERGE = "false";
 
 process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 
-const { resolveAction, promptFileForAction, isReadOnlyAction, commitMessageForAction } = await import("../dist/jobs/actions.js");
+const { resolveAction, promptFileForAction, isReadOnlyAction, commitMessageForAction, actionConstraints } = await import("../dist/jobs/actions.js");
 
 test("resolveAction maps each label to its action", () => {
   assert.equal(resolveAction(["review-it"]), "review");
@@ -75,4 +75,25 @@ test("promptFileForAction maps the new actions to their prompt files", () => {
 test("the new actions are editing (not read-only) actions", () => {
   assert.equal(isReadOnlyAction("add-tests"), false);
   assert.equal(isReadOnlyAction("pass-tests"), false);
+});
+
+test("actionConstraints for add-tests forbids production edits", () => {
+  const c = actionConstraints("add-tests");
+  assert.match(c, /ONLY add or edit test files/i);
+  assert.match(c, /Do NOT modify any production/i);
+  assert.match(c, /MAY fail against the current code/i);
+});
+
+test("actionConstraints for pass-tests freezes test logic", () => {
+  const c = actionConstraints("pass-tests");
+  assert.match(c, /PRODUCTION code only/i);
+  assert.match(c, /mechanical rename/i);
+  assert.match(c, /Do NOT change test logic/i);
+  assert.match(c, /STOP and report/i);
+});
+
+test("actionConstraints is empty for actions without extra constraints", () => {
+  assert.equal(actionConstraints("review"), "");
+  assert.equal(actionConstraints("full-fix"), "");
+  assert.equal(actionConstraints("test"), "");
 });
