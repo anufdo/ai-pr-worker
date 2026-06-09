@@ -38,7 +38,7 @@ export async function prepareRepo(repo: string, cloneUrl: string, branch: string
 }
 
 export async function changedFiles(directory: string): Promise<string[]> {
-  const { stdout } = await runFile("git", ["-C", directory, "status", "--porcelain"]);
+  const { stdout } = await runFile("git", ["-C", directory, "status", "--porcelain", "-u"]);
   return stdout.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3));
 }
 
