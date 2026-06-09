@@ -26,7 +26,8 @@
  *   node scripts/test-ai-step.mjs --dir ../some-repo --pr 42 --repo me/app \
  *        --branch feature/x --title "Add widget" --body "Closes #1"
  *
- * --action is one of: review | test | fix-review | full-fix | e2e (default: review).
+ * --action is one of: review | test | fix-review | full-fix | e2e | add-tests | pass-tests
+ * (default: review).
  */
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -85,7 +86,7 @@ if (!Number.isInteger(prNumber) || prNumber <= 0) {
   process.exit(1);
 }
 
-const ACTIONS = ["review", "test", "fix-review", "full-fix", "e2e"];
+const ACTIONS = ["review", "test", "fix-review", "full-fix", "e2e", "add-tests", "pass-tests"];
 if (!ACTIONS.includes(values.action)) {
   console.error(`--action must be one of: ${ACTIONS.join(", ")} (got "${values.action}").`);
   process.exit(1);
