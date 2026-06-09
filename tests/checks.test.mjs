@@ -12,7 +12,7 @@ process.env.AUTO_MERGE = "false";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 process.chdir(repoRoot);
 
-const { runChecks, checksPassed, defaultCheckSpecs } = await import("../dist/checks/runChecks.js");
+const { runChecks, checksPassed, defaultCheckSpecs, commitBlockingChecks } = await import("../dist/checks/runChecks.js");
 
 const PASS = 'node -e "process.exit(0)"';
 const FAIL = 'node -e "process.exit(1)"';
@@ -77,4 +77,31 @@ test("checksPassed is false when any check failed", () => {
     }),
     false,
   );
+});
+
+function gateChecks(overrides = {}) {
+  const base = {
+    install: { status: "passed", output: "" },
+    lint: { status: "passed", output: "" },
+    test: { status: "passed", output: "" },
+    build: { status: "passed", output: "" },
+    e2e: { status: "skipped", output: "" },
+  };
+  return { ...base, ...overrides };
+}
+
+test("commitBlockingChecks: add-tests ignores a failing test check", () => {
+  assert.equal(commitBlockingChecks("add-tests", gateChecks({ test: { status: "failed", output: "" } })), true);
+});
+
+test("commitBlockingChecks: add-tests still blocks on lint/build/install", () => {
+  assert.equal(commitBlockingChecks("add-tests", gateChecks({ lint: { status: "failed", output: "" } })), false);
+  assert.equal(commitBlockingChecks("add-tests", gateChecks({ build: { status: "failed", output: "" } })), false);
+  assert.equal(commitBlockingChecks("add-tests", gateChecks({ install: { status: "failed", output: "" } })), false);
+});
+
+test("commitBlockingChecks: pass-tests and other actions require the test check", () => {
+  assert.equal(commitBlockingChecks("pass-tests", gateChecks({ test: { status: "failed", output: "" } })), false);
+  assert.equal(commitBlockingChecks("pass-tests", gateChecks()), true);
+  assert.equal(commitBlockingChecks("full-fix", gateChecks({ test: { status: "failed", output: "" } })), false);
 });

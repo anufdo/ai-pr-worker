@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { runShell } from "../utils/exec.js";
+import type { PrAction } from "../jobs/actions.js";
 
 export type CheckStatus = "passed" | "failed" | "skipped";
 export type CheckName = "install" | "lint" | "test" | "build" | "e2e";
@@ -66,4 +67,17 @@ export async function runChecks(
 
 export function checksPassed(checks: CheckResults): boolean {
   return Object.values(checks).every((outcome) => outcome.status !== "failed");
+}
+
+// Whether the checks that *block a commit* all passed, for a given action. For
+// `add-tests` the test check is informational (the new tests may legitimately be
+// red — a later `pass-tests` run makes them green), so it does not block; every
+// other check, and every other action, behaves exactly like `checksPassed`.
+export function commitBlockingChecks(action: PrAction, checks: CheckResults): boolean {
+  if (action === "add-tests") {
+    return (Object.entries(checks) as Array<[CheckName, CheckOutcome]>)
+      .filter(([name]) => name !== "test")
+      .every(([, outcome]) => outcome.status !== "failed");
+  }
+  return checksPassed(checks);
 }
