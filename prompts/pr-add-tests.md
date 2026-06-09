@@ -14,10 +14,10 @@ PR context:
 
 1. Identify what this PR changed (inspect the diff against the base branch and the surrounding code) and what behavior is currently unprotected by tests.
 2. Add focused tests covering the changed behavior: the happy path, important edge cases, and realistic failure scenarios. Follow the project's existing test framework, file layout, and naming conventions.
-3. **Only add or edit test files** (and minimal test fixtures/helpers). Do NOT modify production code for any reason — not even to fix a bug you find. If you find a bug, describe it in your summary so a later `pass-tests` run can fix it.
+3. **Only add or edit test files** (and minimal fixtures/helpers that live under a test directory such as `tests/` or `__tests__/`). Anything outside the project's test-file pattern — including a helper placed in production code — will be rejected and nothing will be committed. Do NOT modify production code for any reason — not even to fix a bug you find. If you find a bug, describe it in your summary so a later `pass-tests` run can fix it.
 4. It is acceptable for the tests you add to FAIL against the current code — a failing edge-case test is the signal the code needs fixing. Do not weaken a test just to make it pass.
 5. Do not modify `.env` files, anything under `.git/`, `deploy*`/`deployment*` directories, or files that look like `credentials`/`secrets`. Never hardcode secrets in tests.
-6. Do not run `git commit`, `git push`, or change git history — the worker commits and pushes after its checks pass.
+6. Do not run `git add`, `git commit`, `git push`, `git mv`, or otherwise stage or rewrite git history — the worker stages, commits, and pushes after its checks pass.
 
 ## Output
 

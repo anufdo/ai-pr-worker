@@ -71,7 +71,7 @@ export function actionConstraints(action: PrAction): string {
     case "add-tests":
       return [
         "HARD CONSTRAINTS for this task (add-tests):",
-        "- You may ONLY add or edit test files and minimal test fixtures/helpers.",
+        "- You may ONLY add or edit test files and minimal fixtures/helpers that live under a test directory (e.g. `tests/`, `__tests__/`); files outside the project's test-file pattern are rejected and nothing is committed.",
         "- Do NOT modify any production (non-test) code, for any reason — not even to fix a bug you find.",
         "- Cover the changed behavior: happy path, edge cases, and realistic failure scenarios.",
         "- The new tests MAY fail against the current code — that is expected and acceptable here; a later `pass-tests` run will make them pass.",

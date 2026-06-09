@@ -161,7 +161,7 @@ node scripts/test-ai-step.mjs --action full-fix --dir /path/to/repo  # run the f
 node scripts/test-ai-step.mjs --dir /path/to/repo        # review another checkout
 ```
 
-`--action` is one of `review | test | fix-review | full-fix | e2e` (default `review`).
+`--action` is one of `review | test | fix-review | full-fix | e2e | add-tests | pass-tests` (default `review`).
 
 The `AI output` block it prints is exactly what the worker would post in the PR comment's `### Notes` section.
 
