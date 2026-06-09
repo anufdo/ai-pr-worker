@@ -87,6 +87,13 @@ export interface Report {
   commit?: string;
 }
 
+function notesSection(notes: string): string {
+  if (!notes) return "No additional notes.";
+  const masked = maskSecrets(notes, config.secrets);
+  if (masked.length <= NOTES_CAP) return masked;
+  return `${masked.slice(0, NOTES_CAP)}\n…(truncated, ${masked.length - NOTES_CAP} more characters; full output in the detail comments below.)`;
+}
+
 export function resultComment(report: Report): string {
   const { job, checks } = report;
   const sections: string[] = [
@@ -101,7 +108,7 @@ export function resultComment(report: Report): string {
     sections.push(`### E2E summary\n\`\`\`\n${clip(checks.e2e.output || "(no output)", SNIPPET_CAP)}\n\`\`\``);
   }
   if (report.commit) sections.push(`### Commit\n\`${report.commit}\``);
-  sections.push(`### Notes\n${report.notes ? clip(report.notes, NOTES_CAP) : "No additional notes."}`);
+  sections.push(`### Notes\n${notesSection(report.notes)}`);
   if (config.includeRawOutput && checks) {
     const raw = rawCheckOutput(checks);
     if (raw) sections.push(`### Raw output\n\`\`\`\n${clip(raw, SNIPPET_CAP)}\n\`\`\``);
@@ -139,6 +146,24 @@ export function detailComments(title: string, text: string): string[] {
 
 async function reportDetails(job: PrJob, title: string, text: string): Promise<void> {
   for (const body of detailComments(title, text)) {
+    await report(job, body);
+  }
+}
+
+// Build the comment payload for a result: the main comment (notes clipped to a
+// preview when long) plus, when the notes exceed the cap, the complete output
+// split across follow-up detail comments so nothing is lost.
+export function buildReportComments(result: Report): { main: string; details: string[] } {
+  const main = resultComment(result);
+  const masked = maskSecrets(result.notes, config.secrets);
+  const details = masked.length > NOTES_CAP ? detailComments("AI output", result.notes) : [];
+  return { main, details };
+}
+
+async function reportResult(job: PrJob, result: Report): Promise<void> {
+  const { main, details } = buildReportComments(result);
+  await report(job, main);
+  for (const body of details) {
     await report(job, body);
   }
 }
