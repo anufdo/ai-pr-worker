@@ -1,15 +1,15 @@
 import { config } from "../config.js";
 import { renderPlanningPrompt, runAi, runAiPrompt } from "../ai/aiRunner.js";
 import { runHermesApply } from "../ai/hermesRunner.js";
-import { checksPassed, runChecks, type CheckName, type CheckOutcome, type CheckResults } from "../checks/runChecks.js";
-import { changedFiles, commitAndPush, prepareRepo } from "../git/gitManager.js";
+import { commitBlockingChecks, runChecks, type CheckName, type CheckOutcome, type CheckResults } from "../checks/runChecks.js";
+import { changedFiles, commitAndPush, deletedPaths, prepareRepo } from "../git/gitManager.js";
 import { commentOnPr } from "../github/comments.js";
 import { logger } from "../utils/logger.js";
 import { maskSecrets } from "../utils/maskSecrets.js";
 import { notify } from "../notify/notifier.js";
 import { withLock } from "./lock.js";
 import { commitMessageForAction, isReadOnlyAction, type PrAction } from "./actions.js";
-import { blockedPaths, isProtectedBranch } from "./guards.js";
+import { blockedPaths, nonTestPaths, isTestPath, isProtectedBranch } from "./guards.js";
 
 export interface PrJob {
   repo: string;
@@ -30,6 +30,8 @@ export interface PrJob {
 const NOTES_CAP = 4000;
 const SNIPPET_CAP = 2000;
 const DETAIL_CHUNK_CAP = 12000;
+// Built once at module load; config.testFilePattern is validated at startup.
+const testFileRegex = new RegExp(config.testFilePattern, "i");
 
 function clip(text: string, cap: number): string {
   const masked = maskSecrets(text, config.secrets);
@@ -191,7 +193,7 @@ export async function processPrJob(job: PrJob): Promise<void> {
       }
 
       if (aiStatus === "failed") {
-        await report(job, resultComment({ job, status: "Failed", aiStatus, summary: "- The AI command failed; no changes were committed.", notes: aiSummary }));
+        await reportResult(job, { job, status: "Failed", aiStatus, summary: "- The AI command failed; no changes were committed.", notes: aiSummary });
         await notify(`AI PR Worker AI step failed: ${job.repo}#${job.prNumber}`);
         return;
       }
@@ -206,6 +208,8 @@ export async function processPrJob(job: PrJob): Promise<void> {
           logger.error("Hermes apply failed", { repo: job.repo, pr: job.prNumber, action: job.action });
         }
 
+        // Posts two separate detail-comment threads (Hermes output + Claude plan), so it
+        // uses report/reportDetails directly rather than reportResult.
         if (hermesStatus === "failed") {
           await report(
             job,
@@ -241,7 +245,7 @@ export async function processPrJob(job: PrJob): Promise<void> {
 
       // Read-only actions (review, e2e) never touch the branch — report and stop.
       if (isReadOnlyAction(job.action)) {
-        await report(job, resultComment({ job, status: "Reviewed", aiStatus, summary: readOnlySummary(job, checks), checks, notes: aiSummary }));
+        await reportResult(job, { job, status: "Reviewed", aiStatus, summary: readOnlySummary(job, checks), checks, notes: aiSummary });
         await notify(`AI PR Worker ${job.action} completed: ${job.repo}#${job.prNumber}`);
         return;
       }
@@ -253,24 +257,21 @@ export async function processPrJob(job: PrJob): Promise<void> {
       // checks, which then ran against unchanged code.
       const files = await changedFiles(directory);
       if (!files.length) {
-        const failedChecks = !checksPassed(checks);
+        const failedChecks = !commitBlockingChecks(job.action, checks);
         const note = looksPermissionBlocked(aiSummary)
           ? `${aiSummary}\n\n> The AI reported a blocked permission and changed no files. For a headless CLI, grant edit permission in AI_COMMAND (Claude Code: \`--permission-mode bypassPermissions\`).`
           : [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n");
-        await report(
+        await reportResult(job, {
           job,
-          resultComment({
-            job,
-            status: failedChecks ? "Failed" : "No changes",
-            aiStatus,
-            hermesStatus,
-            summary: failedChecks
-              ? "- No file changes were made; nothing to commit.\n- Checks failed against the unchanged checkout."
-              : "- No file changes were made; nothing to commit.",
-            checks,
-            notes: note,
-          }),
-        );
+          status: failedChecks ? "Failed" : "No changes",
+          aiStatus,
+          hermesStatus,
+          summary: failedChecks
+            ? "- No file changes were made; nothing to commit.\n- Checks failed against the unchanged checkout."
+            : "- No file changes were made; nothing to commit.",
+          checks,
+          notes: note,
+        });
         await notify(
           failedChecks
             ? `AI PR Worker checks failed with no changes: ${job.repo}#${job.prNumber}`
@@ -279,19 +280,52 @@ export async function processPrJob(job: PrJob): Promise<void> {
         return;
       }
 
-      if (!checksPassed(checks)) {
-        await report(
-          job,
-          resultComment({
+      // Stage 2: add-tests may only touch test files.
+      if (job.action === "add-tests") {
+        const offenders = nonTestPaths(files, testFileRegex);
+        if (offenders.length) {
+          await reportResult(job, {
             job,
             status: "Failed",
             aiStatus,
             hermesStatus,
-            summary: "- Changes were left uncommitted because checks failed.",
             checks,
-            notes: [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n"),
-          }),
-        );
+            summary: "- `add-tests` may only change test files, but production files were modified; nothing was committed.",
+            notes: [`Non-test files changed: ${offenders.join(", ")}`, aiSummary, hermesSummary].filter(Boolean).join("\n\n"),
+          });
+          await notify(`AI PR Worker add-tests touched non-test files: ${job.repo}#${job.prNumber}`);
+          return;
+        }
+      }
+
+      // Stage 3: pass-tests must not delete tests (a common way to fake a green run).
+      if (job.action === "pass-tests") {
+        const deletedTests = (await deletedPaths(directory)).filter((file) => isTestPath(file, testFileRegex));
+        if (deletedTests.length) {
+          await reportResult(job, {
+            job,
+            status: "Failed",
+            aiStatus,
+            hermesStatus,
+            checks,
+            summary: "- `pass-tests` must not delete tests, but test files were removed; nothing was committed.",
+            notes: [`Deleted test files: ${deletedTests.join(", ")}`, aiSummary, hermesSummary].filter(Boolean).join("\n\n"),
+          });
+          await notify(`AI PR Worker pass-tests deleted tests: ${job.repo}#${job.prNumber}`);
+          return;
+        }
+      }
+
+      if (!commitBlockingChecks(job.action, checks)) {
+        await reportResult(job, {
+          job,
+          status: "Failed",
+          aiStatus,
+          hermesStatus,
+          summary: "- Changes were left uncommitted because checks failed.",
+          checks,
+          notes: [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n"),
+        });
         await notify(`AI PR Worker checks failed: ${job.repo}#${job.prNumber}`);
         return;
       }
@@ -301,24 +335,27 @@ export async function processPrJob(job: PrJob): Promise<void> {
 
       const commit = await commitAndPush(directory, job.branch, commitMessageForAction(job.action, job.prNumber));
       const pushNote = config.autoPush ? `Pushed commit \`${commit}\`.` : `Created commit \`${commit}\`; AUTO_PUSH is disabled.`;
-      await report(
+      const testNote =
+        job.action === "add-tests" && checks.test.status === "failed"
+          ? "\n- Added tests are currently red (failing) — run `pass-tests` to make them pass."
+          : job.action === "add-tests" && checks.test.status === "passed"
+            ? "\n- Added tests pass against the current code."
+            : "";
+      await reportResult(job, {
         job,
-        resultComment({
-          job,
-          status: "Success",
-          aiStatus,
-          hermesStatus,
-          summary: `- Updated ${files.length} file(s).\n- ${pushNote}`,
-          checks,
-          commit,
-          notes: [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n"),
-        }),
-      );
+        status: "Success",
+        aiStatus,
+        hermesStatus,
+        summary: `- Updated ${files.length} file(s).\n- ${pushNote}${testNote}`,
+        checks,
+        commit,
+        notes: [aiSummary, hermesSummary].filter(Boolean).join("\n\nHermes output:\n"),
+      });
       await notify(`AI PR Worker completed: ${job.repo}#${job.prNumber} ${pushNote}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error("PR job failed", { repo: job.repo, pr: job.prNumber, error: message });
-      await report(job, resultComment({ job, status: "Failed", summary: "- The worker could not complete this task.", notes: message }));
+      await reportResult(job, { job, status: "Failed", summary: "- The worker could not complete this task.", notes: message });
       await notify(`AI PR Worker failed: ${job.repo}#${job.prNumber}: ${message}`);
     }
   });
