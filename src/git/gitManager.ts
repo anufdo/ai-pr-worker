@@ -38,8 +38,20 @@ export async function prepareRepo(repo: string, cloneUrl: string, branch: string
 }
 
 export async function changedFiles(directory: string): Promise<string[]> {
-  const { stdout } = await runFile("git", ["-C", directory, "status", "--porcelain"]);
+  const { stdout } = await runFile("git", ["-C", directory, "status", "--porcelain", "-u"]);
   return stdout.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3));
+}
+
+// Paths git reports as deleted in the working tree (staged or unstaged).
+// `git status --porcelain` prefixes each line with a two-char XY status; a "D"
+// in either column means the file was removed.
+export async function deletedPaths(directory: string): Promise<string[]> {
+  const { stdout } = await runFile("git", ["-C", directory, "status", "--porcelain"]);
+  return stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .filter((line) => line[0] === "D" || line[1] === "D")
+    .map((line) => line.slice(3));
 }
 
 export async function commitAndPush(directory: string, branch: string, message = "AI: handle task"): Promise<string> {

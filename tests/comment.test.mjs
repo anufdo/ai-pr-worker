@@ -12,7 +12,7 @@ process.env.AUTO_MERGE = "false";
 
 process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 
-const { resultComment, looksPermissionBlocked } = await import("../dist/jobs/processPrJob.js");
+const { resultComment, looksPermissionBlocked, buildReportComments } = await import("../dist/jobs/processPrJob.js");
 
 const job = {
   repo: "local/test-repo",
@@ -101,4 +101,20 @@ test("resultComment does not include raw check output when INCLUDE_RAW_OUTPUT is
   });
   assert.doesNotMatch(body, /### Raw output/);
   assert.doesNotMatch(body, /secret-failure-detail-xyz/);
+});
+
+test("buildReportComments keeps short notes inline with no detail comments", () => {
+  const { main, details } = buildReportComments({ job, status: "Reviewed", summary: "s", notes: "short notes", checks: checks() });
+  assert.match(main, /short notes/);
+  assert.deepEqual(details, []);
+});
+
+test("buildReportComments splits over-cap notes into numbered detail comments", () => {
+  const notes = "A".repeat(30000);
+  const { main, details } = buildReportComments({ job, status: "Reviewed", summary: "s", notes, checks: checks() });
+  assert.match(main, /truncated, \d+ more characters/);
+  assert.match(main, /full output in the detail comments below/);
+  assert.equal(details.length, 3); // 30000 / 12000 -> 3 chunks
+  assert.match(details[0], /## AI PR Worker Detail: AI output \(1\/3\)/);
+  assert.ok(details.every((d) => d.includes("AAAA")));
 });

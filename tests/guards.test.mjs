@@ -11,7 +11,7 @@ process.env.AUTO_MERGE = "false";
 
 process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 
-const { isProtectedBranch, blockedPaths, blockedFiles } = await import("../dist/jobs/guards.js");
+const { isProtectedBranch, blockedPaths, blockedFiles, isTestPath, nonTestPaths } = await import("../dist/jobs/guards.js");
 
 // Mirrors the guard at webhook.ts:40 and the re-check at processPrJob.ts:62.
 test("isProtectedBranch rejects main, master, and the default branch", () => {
@@ -44,4 +44,22 @@ test("blockedPaths returns only the blocked entries and normalizes backslashes",
 
 test("blockedPaths returns an empty array when nothing is blocked", () => {
   assert.deepEqual(blockedPaths(["src/a.ts", "src/b.ts"]), []);
+});
+
+const TEST_RE = /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests?)\/|(^|\/)test_[^/]*\.py$|_test\.(py|go)$/i;
+
+test("isTestPath recognizes common test file conventions", () => {
+  for (const file of ["src/a.test.ts", "src/a.spec.js", "app/__tests__/y.tsx", "tests/run.mjs", "pkg/test_foo.py", "pkg/foo_test.go"]) {
+    assert.equal(isTestPath(file, TEST_RE), true, `expected test file: ${file}`);
+  }
+});
+
+test("isTestPath rejects production files and normalizes backslashes", () => {
+  assert.equal(isTestPath("src/index.ts", TEST_RE), false);
+  assert.equal(isTestPath("app\\__tests__\\y.tsx", TEST_RE), true);
+});
+
+test("nonTestPaths returns only the non-test files", () => {
+  assert.deepEqual(nonTestPaths(["src/a.test.ts", "src/a.ts", "README.md"], TEST_RE), ["src/a.ts", "README.md"]);
+  assert.deepEqual(nonTestPaths(["x.test.ts", "y\\z.spec.ts"], TEST_RE), []);
 });

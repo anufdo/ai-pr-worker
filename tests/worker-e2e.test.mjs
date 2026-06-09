@@ -25,9 +25,11 @@ process.env.AUTO_PUSH = "false";
 process.chdir(repoRoot); // runAi reads prompts/ relative to cwd
 
 const { runAi } = await import("../dist/ai/aiRunner.js");
-const { runChecks, checksPassed } = await import("../dist/checks/runChecks.js");
-const { changedFiles, commitAndPush } = await import("../dist/git/gitManager.js");
-const { blockedPaths } = await import("../dist/jobs/guards.js");
+const { runChecks, checksPassed, commitBlockingChecks } = await import("../dist/checks/runChecks.js");
+const { changedFiles, commitAndPush, deletedPaths } = await import("../dist/git/gitManager.js");
+const { blockedPaths, nonTestPaths } = await import("../dist/jobs/guards.js");
+
+const TEST_RE = /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests?)\/|(^|\/)test_[^/]*\.py$|_test\.(py|go)$/i;
 
 function git(dir, ...args) {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
@@ -123,5 +125,91 @@ test("no-changes slice: a read-only review makes no edits to commit", (t) => {
     assert.equal(checksPassed(checks), true);
     const files = await changedFiles(dir);
     assert.deepEqual(files, []);
+  })();
+});
+
+test("deletedPaths reports files removed from the working tree", (t) => {
+  const dir = makeRepo();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return (async () => {
+    writeFileSync(path.join(dir, "keep.test.js"), "x\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "add test");
+    rmSync(path.join(dir, "keep.test.js"));
+    const deleted = await deletedPaths(dir);
+    assert.deepEqual(deleted, ["keep.test.js"]);
+  })();
+});
+
+test("add-tests slice: a test-only change with red tests is allowed to commit", (t) => {
+  process.env.FAKE_AI_EDIT_FILE = "feature.test.js";
+  const dir = makeRepo();
+  t.after(() => {
+    delete process.env.FAKE_AI_EDIT_FILE;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  return (async () => {
+    await runAi(job("add-tests", dir), dir);
+    const files = await changedFiles(dir);
+    assert.ok(files.includes("feature.test.js"), `expected the test file in ${JSON.stringify(files)}`);
+
+    // Only test files changed -> no offenders.
+    assert.deepEqual(nonTestPaths(files, TEST_RE), []);
+
+    // Even with the test check red, the add-tests gate allows a commit.
+    const redChecks = { install: { status: "skipped", output: "" }, lint: { status: "passed", output: "" }, test: { status: "failed", output: "1 failing" }, build: { status: "skipped", output: "" }, e2e: { status: "skipped", output: "" } };
+    assert.equal(commitBlockingChecks("add-tests", redChecks), true);
+
+    const sha = await commitAndPush(dir, "feature/x", "AI (add-tests) for PR #7");
+    assert.match(sha, /^[0-9a-f]{40}$/);
+    assert.match(git(dir, "show", "--name-only", "--pretty=format:", "HEAD"), /feature\.test\.js/);
+  })();
+});
+
+test("add-tests slice: touching production code is detected as an offender", (t) => {
+  process.env.FAKE_AI_EDIT_FILE = "src/feature.js";
+  const dir = makeRepo();
+  t.after(() => {
+    delete process.env.FAKE_AI_EDIT_FILE;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  return (async () => {
+    await runAi(job("add-tests", dir), dir);
+    const files = await changedFiles(dir);
+    assert.deepEqual(nonTestPaths(files, TEST_RE), ["src/feature.js"]); // worker would refuse to commit
+  })();
+});
+
+test("pass-tests slice: a production edit with all checks green commits", (t) => {
+  process.env.FAKE_AI_EDIT_FILE = "src/feature.js";
+  const dir = makeRepo();
+  t.after(() => {
+    delete process.env.FAKE_AI_EDIT_FILE;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  return (async () => {
+    await runAi(job("pass-tests", dir), dir);
+    const checks = await runChecks(dir, passingChecks);
+    assert.equal(commitBlockingChecks("pass-tests", checks), true);
+    const files = await changedFiles(dir);
+    assert.ok(files.includes("src/feature.js"));
+    const sha = await commitAndPush(dir, "feature/x", "AI (pass-tests) for PR #7");
+    assert.match(sha, /^[0-9a-f]{40}$/);
+  })();
+});
+
+test("pass-tests slice: deleting a test file is flagged", (t) => {
+  const dir = makeRepo();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return (async () => {
+    writeFileSync(path.join(dir, "guarded.test.js"), "x\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "add guarded test");
+    rmSync(path.join(dir, "guarded.test.js"));
+    const deletedTests = (await deletedPaths(dir)).filter((f) => TEST_RE.test(f.replaceAll("\\", "/")));
+    assert.deepEqual(deletedTests, ["guarded.test.js"]); // worker would refuse to commit
   })();
 });

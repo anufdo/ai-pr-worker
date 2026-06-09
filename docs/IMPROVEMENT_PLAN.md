@@ -65,10 +65,18 @@ to a prompt and a behavior with an explicit risk level.
 | `review-it`  | `review`     | No                   | No              | Low    |
 | `test-it`    | `test`       | Tests only*          | Yes (if checks pass) | Medium |
 | `fix-review` | `fix-review` | Yes                  | Yes (if checks pass) | Medium |
+| `add-tests`  | `add-tests`  | Tests only (strict)  | Yes (may commit red tests) | Medium |
+| `pass-tests` | `pass-tests` | Production code       | Yes (all checks pass)      | Medium |
 | `need-this`  | `full-fix`   | Yes                  | Yes (if checks pass) | High   |
 | `e2e-it`     | `e2e`        | No (runs e2e check)  | No              | Low/Med |
 
 \* `test-it` limits edits to tests unless a test exposes a real bug.
+
+The `add-tests` / `pass-tests` pair forms a TDD pipeline: `add-tests` commits
+edge-case tests (which may be red), `pass-tests` then edits production code to
+make them green without changing test logic. Per-action hard constraints live in
+`actionConstraints()` (`src/jobs/actions.ts`) and are injected into the direct,
+planning, and Hermes apply prompts.
 
 Deliberately **not** adding `lint-it` / `build-it` / `db-it` — no real workflow needs them yet.
 

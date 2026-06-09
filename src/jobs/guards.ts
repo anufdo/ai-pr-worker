@@ -18,3 +18,15 @@ export function isProtectedBranch(branch: string, defaultBranch: string): boolea
 export function blockedPaths(files: readonly string[]): string[] {
   return files.filter((file) => blockedFiles.test(file.replaceAll("\\", "/")));
 }
+
+// True when a changed path looks like a test file per the configured regex.
+// Backslashes are normalized so Windows-style git output matches.
+export function isTestPath(file: string, testFileRegex: RegExp): boolean {
+  return testFileRegex.test(file.replaceAll("\\", "/"));
+}
+
+// Of the given changed files, return the ones that are NOT test files. Used to
+// keep the `add-tests` action from touching production code.
+export function nonTestPaths(files: readonly string[], testFileRegex: RegExp): string[] {
+  return files.filter((file) => !isTestPath(file, testFileRegex));
+}

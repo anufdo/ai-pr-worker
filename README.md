@@ -8,17 +8,41 @@ It does not merge PRs, deploy applications, accept arbitrary repositories, or ru
 
 Add one of these labels to a PR in an allowlisted repository to trigger the worker. Each maps to a prompt and a behavior with an explicit risk level:
 
-| Label        | Action       | AI edits?            | Commits/pushes?       | Risk     |
-|--------------|--------------|----------------------|-----------------------|----------|
-| `review-it`  | `review`     | No                   | No                    | Low      |
-| `test-it`    | `test`       | Tests only\*         | Yes (if checks pass)  | Medium   |
-| `fix-review` | `fix-review` | Yes                  | Yes (if checks pass)  | Medium   |
-| `need-this`  | `full-fix`   | Yes                  | Yes (if checks pass)  | High     |
-| `e2e-it`     | `e2e`        | No (runs e2e check)  | No                    | Low/Med  |
+| Label        | Action       | AI edits?            | Commits/pushes?               | Risk     |
+|--------------|--------------|----------------------|-------------------------------|----------|
+| `review-it`  | `review`     | No                   | No                            | Low      |
+| `add-tests`  | `add-tests`  | Tests only (strict)  | Yes (may commit failing tests)| Medium   |
+| `pass-tests` | `pass-tests` | Production code      | Yes (only if all checks pass) | Medium   |
+| `test-it`    | `test`       | Tests only\*         | Yes (if checks pass)          | Medium   |
+| `fix-review` | `fix-review` | Yes                  | Yes (if checks pass)          | Medium   |
+| `need-this`  | `full-fix`   | Yes                  | Yes (if checks pass)          | High     |
+| `e2e-it`     | `e2e`        | No (runs e2e check)  | No                            | Low/Med  |
 
 \* `test-it` limits edits to tests unless a test exposes a real bug.
 
-`need-this` is kept for backward compatibility and is the highest-automation action. The configurable `TRIGGER_LABEL` also maps to `full-fix`. When a PR carries several action labels, the highest automation wins — precedence is `need-this` > `fix-review` > `test-it` > `e2e-it` > `review-it` — and the chosen action is named in the PR comment. Each action uses its own prompt in `prompts/` (`pr-review.md`, `pr-test.md`, `pr-fix-review.md`, `pr-full-fix.md`; `e2e` reuses the read-only review prompt).
+`need-this` is kept for backward compatibility and is the highest-automation action. The configurable `TRIGGER_LABEL` also maps to `full-fix`. When a PR carries several action labels, the highest automation wins — precedence is `need-this` > `fix-review` > `pass-tests` > `test-it` > `add-tests` > `e2e-it` > `review-it` — and the chosen action is named in the PR comment. Each action uses its own prompt in `prompts/` (`pr-review.md`, `pr-test.md`, `pr-fix-review.md`, `pr-full-fix.md`, `pr-add-tests.md`, `pr-pass-tests.md`; `e2e` reuses the read-only review prompt).
+
+### Review → add tests → make them pass (TDD pipeline)
+
+Three labels run a deliberate test-driven loop, one at a time on the PR branch:
+
+1. `review-it` — read-only review. Long reviews are posted in full: when the
+   output exceeds the comment cap, the rest is split across follow-up
+   "AI PR Worker Detail" comments instead of being truncated.
+2. `add-tests` — adds edge-case tests **only** (happy path, edge cases, failure
+   scenarios). It never edits production code. These tests **may be committed
+   while failing** — a red edge-case test is the signal that the code needs a
+   fix — provided the other checks (install/lint/build) don't fail (a
+   skipped check is fine) and only test files changed
+   (`TEST_FILE_PATTERN` decides what counts as a test). The commit/push still
+   obeys `AUTO_PUSH`, so this is opt-in.
+3. `pass-tests` — edits **production code** to make the committed tests pass.
+   Tests are frozen except mechanical renames (updating identifiers when a
+   variable/function is renamed or a call signature changes); it will not delete
+   tests, and it commits only when all checks (including tests) pass.
+
+Precedence is `need-this` > `fix-review` > `pass-tests` > `test-it` >
+`add-tests` > `e2e-it` > `review-it`.
 
 ## Supported AI runners
 
@@ -137,7 +161,7 @@ node scripts/test-ai-step.mjs --action full-fix --dir /path/to/repo  # run the f
 node scripts/test-ai-step.mjs --dir /path/to/repo        # review another checkout
 ```
 
-`--action` is one of `review | test | fix-review | full-fix | e2e` (default `review`).
+`--action` is one of `review | test | fix-review | full-fix | e2e | add-tests | pass-tests` (default `review`).
 
 The `AI output` block it prints is exactly what the worker would post in the PR comment's `### Notes` section.
 

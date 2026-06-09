@@ -2,8 +2,10 @@ import { config } from "../config.js";
 import type { PrJob } from "../jobs/processPrJob.js";
 import { commandFromTemplate } from "./providers/custom.js";
 import { runFile } from "../utils/exec.js";
+import { actionConstraints } from "../jobs/actions.js";
 
 export function hermesApplyPrompt(job: PrJob, directory: string, plan: string): string {
+  const constraints = actionConstraints(job.action);
   return [
     "You are the executor for ai-pr-worker on a checked-out pull request repository.",
     "Apply the requested PR changes directly in the working tree.",
@@ -19,6 +21,7 @@ export function hermesApplyPrompt(job: PrJob, directory: string, plan: string): 
     "Claude read-only plan:",
     plan || "(Claude produced no plan.)",
     "",
+    ...(constraints ? [constraints, ""] : []),
     "Instructions:",
     "1. Edit files directly in this working tree.",
     "2. Keep the change small and focused.",

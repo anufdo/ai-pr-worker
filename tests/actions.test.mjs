@@ -11,7 +11,7 @@ process.env.AUTO_MERGE = "false";
 
 process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 
-const { resolveAction, promptFileForAction, isReadOnlyAction, commitMessageForAction } = await import("../dist/jobs/actions.js");
+const { resolveAction, promptFileForAction, isReadOnlyAction, commitMessageForAction, actionConstraints } = await import("../dist/jobs/actions.js");
 
 test("resolveAction maps each label to its action", () => {
   assert.equal(resolveAction(["review-it"]), "review");
@@ -52,4 +52,48 @@ test("isReadOnlyAction is true only for review and e2e", () => {
 
 test("commitMessageForAction names the action and PR", () => {
   assert.equal(commitMessageForAction("full-fix", 42), "AI (full-fix) for PR #42");
+});
+
+test("resolveAction maps the two new pipeline labels", () => {
+  assert.equal(resolveAction(["add-tests"]), "add-tests");
+  assert.equal(resolveAction(["pass-tests"]), "pass-tests");
+});
+
+test("resolveAction precedence places pass-tests above test above add-tests", () => {
+  assert.equal(resolveAction(["add-tests", "pass-tests"]), "pass-tests");
+  assert.equal(resolveAction(["test-it", "add-tests"]), "test");
+  assert.equal(resolveAction(["fix-review", "pass-tests"]), "fix-review");
+  assert.equal(resolveAction(["review-it", "add-tests"]), "add-tests");
+  assert.equal(resolveAction(["need-this", "pass-tests", "add-tests"]), "full-fix");
+});
+
+test("promptFileForAction maps the new actions to their prompt files", () => {
+  assert.equal(promptFileForAction("add-tests"), "pr-add-tests.md");
+  assert.equal(promptFileForAction("pass-tests"), "pr-pass-tests.md");
+});
+
+test("the new actions are editing (not read-only) actions", () => {
+  assert.equal(isReadOnlyAction("add-tests"), false);
+  assert.equal(isReadOnlyAction("pass-tests"), false);
+});
+
+test("actionConstraints for add-tests forbids production edits", () => {
+  const c = actionConstraints("add-tests");
+  assert.match(c, /ONLY add or edit test files/i);
+  assert.match(c, /Do NOT modify any production/i);
+  assert.match(c, /MAY fail against the current code/i);
+});
+
+test("actionConstraints for pass-tests freezes test logic", () => {
+  const c = actionConstraints("pass-tests");
+  assert.match(c, /PRODUCTION code only/i);
+  assert.match(c, /mechanical rename/i);
+  assert.match(c, /Do NOT change test logic/i);
+  assert.match(c, /STOP and report/i);
+});
+
+test("actionConstraints is empty for actions without extra constraints", () => {
+  assert.equal(actionConstraints("review"), "");
+  assert.equal(actionConstraints("full-fix"), "");
+  assert.equal(actionConstraints("test"), "");
 });
