@@ -26,7 +26,7 @@ process.chdir(repoRoot); // runAi reads prompts/ relative to cwd
 
 const { runAi } = await import("../dist/ai/aiRunner.js");
 const { runChecks, checksPassed } = await import("../dist/checks/runChecks.js");
-const { changedFiles, commitAndPush } = await import("../dist/git/gitManager.js");
+const { changedFiles, commitAndPush, deletedPaths } = await import("../dist/git/gitManager.js");
 const { blockedPaths } = await import("../dist/jobs/guards.js");
 
 function git(dir, ...args) {
@@ -123,5 +123,18 @@ test("no-changes slice: a read-only review makes no edits to commit", (t) => {
     assert.equal(checksPassed(checks), true);
     const files = await changedFiles(dir);
     assert.deepEqual(files, []);
+  })();
+});
+
+test("deletedPaths reports files removed from the working tree", (t) => {
+  const dir = makeRepo();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return (async () => {
+    writeFileSync(path.join(dir, "keep.test.js"), "x\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "add test");
+    rmSync(path.join(dir, "keep.test.js"));
+    const deleted = await deletedPaths(dir);
+    assert.deepEqual(deleted, ["keep.test.js"]);
   })();
 });
