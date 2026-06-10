@@ -31,10 +31,19 @@ export async function prepareRepo(repo: string, cloneUrl: string, branch: string
   } else {
     await runFile("git", ["clone", authenticatedUrl(cloneUrl), directory]);
   }
-  await runFile("git", ["-C", directory, "checkout", "-B", branch, `origin/${branch}`]);
+  await checkoutBranch(directory, branch);
+  return directory;
+}
+
+// Pin the working tree to origin/<branch>. The clone is persistent and reused
+// across jobs, so it can carry leftover state from a previous run. `-f` discards
+// local changes and untracked files that are in the way, so that leftover state
+// can't abort the checkout ("untracked working tree files would be overwritten");
+// reset --hard and clean then pin the tree to the remote exactly.
+export async function checkoutBranch(directory: string, branch: string): Promise<void> {
+  await runFile("git", ["-C", directory, "checkout", "-f", "-B", branch, `origin/${branch}`]);
   await runFile("git", ["-C", directory, "reset", "--hard", `origin/${branch}`]);
   await runFile("git", ["-C", directory, "clean", "-fd"]);
-  return directory;
 }
 
 export async function changedFiles(directory: string): Promise<string[]> {

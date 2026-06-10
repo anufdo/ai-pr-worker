@@ -39,7 +39,10 @@ function clip(text: string, cap: number): string {
   return `${masked.slice(0, cap)}\n…(truncated, ${masked.length - cap} more characters)`;
 }
 
-function aiErrorOutput(error: unknown): string {
+// Extract the most useful text from a thrown error. runFile attaches the failed
+// command's stdout/stderr to the error; prefer that (git/CLI failures put the
+// real reason on stderr) over the generic "Command failed: ..." message.
+export function errorOutput(error: unknown): string {
   if (error && typeof error === "object") {
     const out = "stdout" in error && typeof error.stdout === "string" ? error.stdout : "";
     const err = "stderr" in error && typeof error.stderr === "string" ? error.stderr : "";
@@ -188,7 +191,7 @@ export async function processPrJob(job: PrJob): Promise<void> {
         aiSummary = useHermesExecutor ? await runAiPrompt(renderPlanningPrompt(job), directory) : await runAi(job, directory);
       } catch (error) {
         aiStatus = "failed";
-        aiSummary = aiErrorOutput(error);
+        aiSummary = errorOutput(error);
         logger.error("AI command failed", { repo: job.repo, pr: job.prNumber, action: job.action });
       }
 
@@ -204,7 +207,7 @@ export async function processPrJob(job: PrJob): Promise<void> {
           hermesSummary = await runHermesApply(job, directory, aiSummary);
         } catch (error) {
           hermesStatus = "failed";
-          hermesSummary = aiErrorOutput(error);
+          hermesSummary = errorOutput(error);
           logger.error("Hermes apply failed", { repo: job.repo, pr: job.prNumber, action: job.action });
         }
 
@@ -353,9 +356,12 @@ export async function processPrJob(job: PrJob): Promise<void> {
       });
       await notify(`AI PR Worker completed: ${job.repo}#${job.prNumber} ${pushNote}`);
     } catch (error) {
+      // Surface the failed command's stderr (where git/CLI errors put the real
+      // reason), not just the generic "Command failed: ..." message.
+      const notes = errorOutput(error);
       const message = error instanceof Error ? error.message : String(error);
-      logger.error("PR job failed", { repo: job.repo, pr: job.prNumber, error: message });
-      await reportResult(job, { job, status: "Failed", summary: "- The worker could not complete this task.", notes: message });
+      logger.error("PR job failed", { repo: job.repo, pr: job.prNumber, error: notes });
+      await reportResult(job, { job, status: "Failed", summary: "- The worker could not complete this task.", notes });
       await notify(`AI PR Worker failed: ${job.repo}#${job.prNumber}: ${message}`);
     }
   });
