@@ -26,8 +26,11 @@ Add one of these labels to a PR in an allowlisted repository to trigger the work
 
 Three labels run a deliberate test-driven loop, one at a time on the PR branch:
 
-1. `review-it` — read-only review. Long reviews are posted in full: when the
-   output exceeds the comment cap, the rest is split across follow-up
+1. `review-it` — read-only review. It is deliberately short: the AI scores the
+   PR 1–10 on only five axes (security vulnerabilities, authentication, data
+   validation, input sanitization, best practices) and ends with a
+   ✅ merge / ❌ fix-first verdict — no edits or commits. If a review still
+   exceeds the comment cap, the rest is split across follow-up
    "AI PR Worker Detail" comments instead of being truncated.
 2. `add-tests` — adds edge-case tests **only** (happy path, edge cases, failure
    scenarios). It never edits production code. These tests **may be committed
